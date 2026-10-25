@@ -1,0 +1,5 @@
+error: `max` (1) is lower than `min` (5)
+ --> tests/ui/validate_min_above_max.rs:7:45
+  |
+7 |     #[entity(validate(length(min = 5, max = 1)))]
+  |                                             ^

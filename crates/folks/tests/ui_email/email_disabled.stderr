@@ -1,0 +1,5 @@
+error: the `email` rule needs the `email` feature of the `folks` crate (features = ["email"])
+ --> tests/ui_email/email_disabled.rs:8:23
+  |
+8 |     #[entity(validate(email))]
+  |                       ^^^^^

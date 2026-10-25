@@ -1,0 +1,22 @@
+[package]
+name = "folks-macros"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.99"
+
+[lib]
+proc-macro = true
+
+[features]
+schemars = []
+utoipa = []
+email = []
+url = []
+pattern = ["dep:regex-syntax"]
+
+[dependencies]
+regex-syntax = { version = "0.8", optional = true }
+proc-macro-crate = "3"
+proc-macro2 = "1"
+quote = "1"
+syn = "2"

@@ -1,0 +1,5 @@
+error: `readonly` conflicts with `immutable`
+ --> tests/ui/readonly_and_immutable.rs:7:14
+  |
+7 |     #[entity(readonly, immutable)]
+  |              ^^^^^^^^

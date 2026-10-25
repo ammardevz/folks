@@ -1,0 +1,5 @@
+error: `readonly`/`immutable` conflict with `skip`
+ --> tests/ui/skip_with_readonly.rs:7:20
+  |
+7 |     #[entity(skip, readonly)]
+  |                    ^^^^^^^^

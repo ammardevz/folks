@@ -1,0 +1,5 @@
+error: `each(..)` does not support `std::collections::HashMap<String, String>`; use Vec, VecDeque, HashSet, BTreeSet, a slice or an array
+ --> tests/ui/validate_each_on_map.rs:7:23
+  |
+7 |     #[entity(validate(each(length(max = 2))))]
+  |                       ^^^^

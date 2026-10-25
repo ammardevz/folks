@@ -1,0 +1,5 @@
+error: expected one of: from, setters, patch, default, new
+ --> tests/ui/no_unknown_helper.rs:4:13
+  |
+4 | #[entity(no(everything))]
+  |             ^^^^^^^^^^

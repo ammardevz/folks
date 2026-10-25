@@ -1,0 +1,5 @@
+error: `u8` is unsigned; a negative bound can never apply
+ --> tests/ui/validate_negative_on_unsigned.rs:7:36
+  |
+7 |     #[entity(validate(range(min = -1)))]
+  |                                    ^

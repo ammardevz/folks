@@ -1,0 +1,5 @@
+error: `length` needs at least one of `min`, `max`, `equal`
+ --> tests/ui/validate_length_needs_a_bound.rs:7:23
+  |
+7 |     #[entity(validate(length))]
+  |                       ^^^^^^

@@ -1,0 +1,5 @@
+error: `clearable` cannot be combined with `serde_as`
+ --> tests/ui/clearable_with_serde_as.rs:7:14
+  |
+7 |     #[entity(clearable, serde_as = "DisplayFromStr")]
+  |              ^^^^^^^^^

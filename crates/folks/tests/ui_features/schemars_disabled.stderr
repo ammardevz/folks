@@ -1,0 +1,5 @@
+error: `schemars` needs the `schemars` feature of the `folks` crate (features = ["schemars"])
+ --> tests/ui_features/schemars_disabled.rs:5:10
+  |
+5 | #[entity(schemars)]
+  |          ^^^^^^^^

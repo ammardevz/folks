@@ -1,0 +1,34 @@
+# Cargo build output
+/target
+
+# trybuild scratch directory (written by the compile-fail tests)
+**/wip/
+
+# Rustfmt backups
+**/*.rs.bk
+
+# Coverage and profiling output
+*.profraw
+*.profdata
+lcov.info
+cobertura.xml
+tarpaulin-report.html
+/coverage/
+
+# Editors and IDEs
+.idea/
+.vscode/
+.fleet/
+*.swp
+*.swo
+*~
+
+# Operating system files
+.DS_Store
+Thumbs.db
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+.direnv/

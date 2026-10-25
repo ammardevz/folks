@@ -1,0 +1,5 @@
+error: unknown option for `response(..)`; expected one of: name = "..", vis = "..", derive(..), serde(..), rename_all = "..", strict
+ --> tests/ui/type_block_unknown_option.rs:4:19
+  |
+4 | #[entity(response(colour = "red"))]
+  |                   ^^^^^^

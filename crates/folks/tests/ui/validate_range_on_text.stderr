@@ -1,0 +1,5 @@
+error: `range` cannot be applied to `String`: it needs a number (integer or float)
+ --> tests/ui/validate_range_on_text.rs:7:23
+  |
+7 |     #[entity(validate(range(min = 1)))]
+  |                       ^^^^^

@@ -1,0 +1,5 @@
+error: `crate` is set by folks and cannot be overridden
+ --> tests/ui/serde_crate_override.rs:4:16
+  |
+4 | #[entity(serde(crate = "other"))]
+  |                ^^^^^^^^^^^^^^^

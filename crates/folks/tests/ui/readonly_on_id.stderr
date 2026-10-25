@@ -1,0 +1,5 @@
+error: the id is already read-only; remove `readonly`
+ --> tests/ui/readonly_on_id.rs:5:18
+  |
+5 |     #[entity(id, readonly)]
+  |                  ^^^^^^^^

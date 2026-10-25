@@ -1,0 +1,5 @@
+error: `clearable` needs the field in update requests (it is skipped or excluded)
+ --> tests/ui/clearable_not_in_update.rs:7:14
+  |
+7 |     #[entity(clearable, create)]
+  |              ^^^^^^^^^

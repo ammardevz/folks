@@ -1,0 +1,5 @@
+error: `serde_as` must be a type, e.g. `serde_as = "DisplayFromStr"`: unexpected token
+ --> tests/ui/bad_serde_as.rs:7:25
+  |
+7 |     #[entity(serde_as = "not a type !!")]
+  |                         ^^^^^^^^^^^^^^^

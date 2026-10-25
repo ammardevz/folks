@@ -1,0 +1,5 @@
+error: `required` is only enforced in create requests, but this field is not in them
+ --> tests/ui/validate_required_not_in_create.rs:7:31
+  |
+7 |     #[entity(update, validate(required))]
+  |                               ^^^^^^^^

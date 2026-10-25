@@ -1,0 +1,5 @@
+error: `u8` is an integer type; use an integer bound, not a float
+ --> tests/ui/validate_float_bound_on_int.rs:7:35
+  |
+7 |     #[entity(validate(range(min = 1.5)))]
+  |                                   ^^^

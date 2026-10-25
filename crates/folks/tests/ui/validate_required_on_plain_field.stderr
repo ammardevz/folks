@@ -1,0 +1,5 @@
+error: `required` needs a field declared `Option<T>`; other fields are always present
+ --> tests/ui/validate_required_on_plain_field.rs:7:23
+  |
+7 |     #[entity(validate(required))]
+  |                       ^^^^^^^^

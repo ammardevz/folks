@@ -1,0 +1,5 @@
+error: `clearable` needs a field declared `Option<T>`: only nullable fields can be set to null
+ --> tests/ui/clearable_non_option.rs:7:14
+  |
+7 |     #[entity(clearable)]
+  |              ^^^^^^^^^

@@ -1,0 +1,5 @@
+error: `validate` takes rules, e.g. `validate(length(min = 1))`; for a custom function use `validate(custom(path::to::fn))`
+ --> tests/ui/validate_old_syntax.rs:7:14
+  |
+7 |     #[entity(validate = "check")]
+  |              ^^^^^^^^

@@ -1,0 +1,5 @@
+error: the id field is always part of the delete request; remove `delete`
+ --> tests/ui/id_explicit_delete.rs:5:18
+  |
+5 |     #[entity(id, delete)]
+  |                  ^^^^^^

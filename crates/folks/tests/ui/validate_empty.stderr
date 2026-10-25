@@ -1,0 +1,5 @@
+error: `validate()` needs at least one rule
+ --> tests/ui/validate_empty.rs:7:14
+  |
+7 |     #[entity(validate())]
+  |              ^^^^^^^^

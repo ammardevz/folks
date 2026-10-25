@@ -1,0 +1,5 @@
+error: the id field cannot be included in the update request
+ --> tests/ui/id_in_update.rs:5:18
+  |
+5 |     #[entity(id, update)]
+  |                  ^^^^^^

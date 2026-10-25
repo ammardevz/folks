@@ -1,0 +1,5 @@
+error: expected string literal
+ --> tests/ui/validate_contains_needs_string.rs:7:32
+  |
+7 |     #[entity(validate(contains(5)))]
+  |                                ^

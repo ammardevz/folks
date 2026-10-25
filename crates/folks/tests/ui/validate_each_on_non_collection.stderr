@@ -1,0 +1,5 @@
+error: `each` cannot be applied to `String`: it needs a collection (Vec, VecDeque, HashSet, BTreeSet, slice or array)
+ --> tests/ui/validate_each_on_non_collection.rs:7:23
+  |
+7 |     #[entity(validate(each(length(max = 2))))]
+  |                       ^^^^

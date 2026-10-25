@@ -1,0 +1,11 @@
+error: only one field may be marked `#[entity(id)]`
+ --> tests/ui/multiple_ids.rs:7:14
+  |
+7 |     #[entity(id)]
+  |              ^^
+
+error: first `#[entity(id)]` field is here
+ --> tests/ui/multiple_ids.rs:5:14
+  |
+5 |     #[entity(id)]
+  |              ^^

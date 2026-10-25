@@ -1,0 +1,5 @@
+error: `update` conflicts with `readonly` on field `name`
+ --> tests/ui/readonly_with_list.rs:7:24
+  |
+7 |     #[entity(readonly, update)]
+  |                        ^^^^^^

@@ -1,0 +1,5 @@
+error: the `#[entity(id)]` field cannot be skipped
+ --> tests/ui/skip_on_id.rs:5:18
+  |
+5 |     #[entity(id, skip)]
+  |                  ^^^^

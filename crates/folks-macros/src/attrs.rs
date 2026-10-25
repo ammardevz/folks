@@ -1,0 +1,389 @@
+//! Parsing of `#[entity(...)]` and the allow-listed `#[serde(...)]` keys.
+
+use proc_macro2::{Span, TokenStream};
+use syn::meta::ParseNestedMeta;
+use syn::punctuated::Punctuated;
+use syn::spanned::Spanned;
+use syn::{
+    Attribute, Error, Ident, LitBool, LitStr, Meta, Path, Result, Token, Type, Visibility,
+    parenthesized, parse_quote,
+};
+
+use crate::model::{Helpers, Target};
+use crate::rules::{self, Rule};
+
+/// Accumulate errors so several problems are reported at once.
+pub fn push_error(acc: &mut Option<Error>, e: Error) {
+    match acc {
+        Some(a) => a.combine(e),
+        None => *acc = Some(e),
+    }
+}
+
+const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, response, create, update, delete, query, \
+     default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
+
+#[derive(Default)]
+pub struct FieldAttrs {
+    pub id: Option<Span>,
+    pub skip: Option<Span>,
+    pub readonly: Option<Span>,
+    pub immutable: Option<Span>,
+    pub targets: Vec<(Target, Span)>,
+    pub default: Option<(Span, Option<LitStr>)>,
+    pub clearable: Option<(Span, bool)>,
+    pub serde_as: Option<Type>,
+    /// Span of `validate(..)` and its parsed, not yet type-checked rules.
+    pub validate: Option<(Span, Vec<Rule>)>,
+}
+
+pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
+    let mut out = FieldAttrs::default();
+    let mut errors = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("entity")) {
+        let res = attr.parse_nested_meta(|meta| {
+            let span = meta.path.span();
+            if meta.path.is_ident("id") {
+                set_once(&mut out.id, span, "id")
+            } else if meta.path.is_ident("skip") {
+                set_once(&mut out.skip, span, "skip")
+            } else if meta.path.is_ident("readonly") {
+                set_once(&mut out.readonly, span, "readonly")
+            } else if meta.path.is_ident("immutable") {
+                set_once(&mut out.immutable, span, "immutable")
+            } else if meta.path.is_ident("clearable") {
+                if out.clearable.is_some() {
+                    return Err(Error::new(span, "duplicate `clearable` option"));
+                }
+                let value = if meta.input.peek(Token![=]) {
+                    meta.value()?.parse::<LitBool>()?.value
+                } else {
+                    true
+                };
+                out.clearable = Some((span, value));
+                Ok(())
+            } else if meta.path.is_ident("default") {
+                if out.default.is_some() {
+                    return Err(Error::new(span, "duplicate `default` option"));
+                }
+                let lit = if meta.input.peek(Token![=]) {
+                    let lit: LitStr = meta.value()?.parse()?;
+                    lit.parse::<Path>().map_err(|e| {
+                        Error::new(
+                            e.span(),
+                            format!("`default` must be a function path, e.g. `default = \"make_id\"`: {e}"),
+                        )
+                    })?;
+                    Some(lit)
+                } else {
+                    None
+                };
+                out.default = Some((span, lit));
+                Ok(())
+            } else if let Some(t) = Target::from_path(&meta.path) {
+                if out.targets.iter().any(|(x, _)| *x == t) {
+                    return Err(Error::new(
+                        span,
+                        format!("duplicate `{}` option", t.keyword()),
+                    ));
+                }
+                out.targets.push((t, span));
+                Ok(())
+            } else if meta.path.is_ident("serde_as") {
+                if out.serde_as.is_some() {
+                    return Err(Error::new(span, "duplicate `serde_as` option"));
+                }
+                let lit: LitStr = meta.value()?.parse()?;
+                out.serde_as = Some(lit.parse().map_err(|e| {
+                    Error::new(
+                        e.span(),
+                        format!(
+                            "`serde_as` must be a type, e.g. `serde_as = \"DisplayFromStr\"`: {e}"
+                        ),
+                    )
+                })?);
+                Ok(())
+            } else if meta.path.is_ident("validate") {
+                if out.validate.is_some() {
+                    return Err(Error::new(span, "duplicate `validate` option"));
+                }
+                if meta.input.peek(Token![=]) {
+                    return Err(meta.error(
+                        "`validate` takes rules, e.g. `validate(length(min = 1))`; \
+                         for a custom function use `validate(custom(path::to::fn))`",
+                    ));
+                }
+                let content;
+                parenthesized!(content in meta.input);
+                let tokens: TokenStream = content.parse()?;
+                if tokens.is_empty() {
+                    return Err(Error::new(span, "`validate()` needs at least one rule"));
+                }
+                out.validate = Some((span, rules::parse_rules(tokens)?));
+                Ok(())
+            } else {
+                Err(meta.error(format!(
+                    "unknown `entity` field option; expected one of: {FIELD_OPTIONS}"
+                )))
+            }
+        });
+        if let Err(e) = res {
+            push_error(&mut errors, e);
+        }
+    }
+    match errors {
+        Some(e) => Err(e),
+        None => Ok(out),
+    }
+}
+
+fn set_once(slot: &mut Option<Span>, span: Span, name: &str) -> Result<()> {
+    if slot.is_some() {
+        return Err(Error::new(span, format!("duplicate `{name}` option")));
+    }
+    *slot = Some(span);
+    Ok(())
+}
+
+/// Settings for one generated type (or, as `shared`, for all of them).
+#[derive(Default)]
+pub struct TypeConfig {
+    pub name: Option<Ident>,
+    pub vis: Option<Visibility>,
+    pub derives: Vec<Path>,
+    pub serde: Vec<Meta>,
+    pub strict: Option<bool>,
+}
+
+#[derive(Default)]
+pub struct ContainerAttrs {
+    /// `name = ".."`: prefix of the generated type names.
+    pub prefix: Option<Ident>,
+    pub shared: TypeConfig,
+    /// Indexed by `Target::index()`; overrides `shared`.
+    pub per_type: [TypeConfig; 5],
+    pub helpers: Helpers,
+    /// Merge-patch mode: every `Option<T>` field is clearable by default.
+    pub patch: bool,
+    /// Opt-in: `Diff` for the update request.
+    pub diff: bool,
+    /// Opt-in: `Filter` for the query request.
+    pub matches: bool,
+    pub schemars: bool,
+    pub utoipa: bool,
+    /// `rename_all` copied from the source struct's own `#[serde(..)]`.
+    pub source_serde: Vec<Meta>,
+}
+
+const CONTAINER_OPTIONS: &str = "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", \
+     strict, patch, diff, matches, schemars, utoipa, no(..), and per-type blocks \
+     response(..) / create(..) / update(..) / delete(..) / query(..)";
+const TYPE_OPTIONS: &str =
+    "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", strict";
+
+/// Options valid both on the struct (all types) and inside a per-type block.
+fn parse_common(meta: &ParseNestedMeta<'_>, cfg: &mut TypeConfig) -> Result<bool> {
+    let p = &meta.path;
+    if p.is_ident("vis") {
+        if cfg.vis.is_some() {
+            return Err(meta.error("duplicate `vis` option"));
+        }
+        let lit: LitStr = meta.value()?.parse()?;
+        cfg.vis = Some(lit.parse().map_err(|e| {
+            Error::new(
+                e.span(),
+                format!("`vis` must be a visibility such as \"pub(crate)\": {e}"),
+            )
+        })?);
+    } else if p.is_ident("derive") {
+        let content;
+        parenthesized!(content in meta.input);
+        cfg.derives
+            .extend(Punctuated::<Path, Token![,]>::parse_terminated(&content)?);
+    } else if p.is_ident("serde") {
+        let content;
+        parenthesized!(content in meta.input);
+        for m in Punctuated::<Meta, Token![,]>::parse_terminated(&content)? {
+            if m.path().is_ident("crate") {
+                return Err(Error::new_spanned(
+                    &m,
+                    "`crate` is set by folks and cannot be overridden",
+                ));
+            }
+            cfg.serde.push(m);
+        }
+    } else if p.is_ident("rename_all") {
+        let lit: LitStr = meta.value()?.parse()?;
+        cfg.serde.push(parse_quote!(rename_all = #lit));
+    } else if p.is_ident("strict") {
+        if cfg.strict.is_some() {
+            return Err(meta.error("duplicate `strict` option"));
+        }
+        cfg.strict = Some(if meta.input.peek(Token![=]) {
+            meta.value()?.parse::<LitBool>()?.value
+        } else {
+            true
+        });
+    } else {
+        return Ok(false);
+    }
+    Ok(true)
+}
+
+fn ident_from_lit(lit: &LitStr, what: &str) -> Result<Ident> {
+    lit.parse()
+        .map_err(|e| Error::new(e.span(), format!("{what} must be a valid identifier: {e}")))
+}
+
+fn require_feature(enabled: bool, meta: &ParseNestedMeta<'_>, name: &str) -> Result<()> {
+    if enabled {
+        Ok(())
+    } else {
+        Err(meta.error(format!(
+            "`{name}` needs the `{name}` feature of the `folks` crate (features = [\"{name}\"])"
+        )))
+    }
+}
+
+pub fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
+    let mut out = ContainerAttrs::default();
+    let mut errors = None;
+    for attr in attrs.iter().filter(|a| a.path().is_ident("entity")) {
+        let res = attr.parse_nested_meta(|meta| {
+            if meta.path.is_ident("name") {
+                if out.prefix.is_some() {
+                    return Err(meta.error("duplicate `name` option"));
+                }
+                let lit: LitStr = meta.value()?.parse()?;
+                out.prefix = Some(ident_from_lit(&lit, "`name`")?);
+                Ok(())
+            } else if let Some(t) = Target::from_path(&meta.path) {
+                let cfg = &mut out.per_type[t.index()];
+                meta.parse_nested_meta(|m| {
+                    if m.path.is_ident("name") {
+                        if cfg.name.is_some() {
+                            return Err(m.error("duplicate `name` option"));
+                        }
+                        let lit: LitStr = m.value()?.parse()?;
+                        cfg.name = Some(ident_from_lit(&lit, "`name`")?);
+                        Ok(())
+                    } else if parse_common(&m, cfg)? {
+                        Ok(())
+                    } else {
+                        Err(m.error(format!(
+                            "unknown option for `{}(..)`; expected one of: {TYPE_OPTIONS}",
+                            t.keyword()
+                        )))
+                    }
+                })
+            } else if meta.path.is_ident("no") {
+                meta.parse_nested_meta(|m| {
+                    if m.path.is_ident("from") {
+                        out.helpers.from = false;
+                    } else if m.path.is_ident("setters") {
+                        out.helpers.setters = false;
+                    } else if m.path.is_ident("patch") {
+                        out.helpers.patch = false;
+                    } else if m.path.is_ident("default") {
+                        out.helpers.default = false;
+                    } else if m.path.is_ident("new") {
+                        out.helpers.new = false;
+                    } else {
+                        return Err(m.error("expected one of: from, setters, patch, default, new"));
+                    }
+                    Ok(())
+                })
+            } else if meta.path.is_ident("patch") {
+                out.patch = true;
+                Ok(())
+            } else if meta.path.is_ident("diff") {
+                out.diff = true;
+                Ok(())
+            } else if meta.path.is_ident("matches") {
+                out.matches = true;
+                Ok(())
+            } else if meta.path.is_ident("schemars") {
+                require_feature(cfg!(feature = "schemars"), &meta, "schemars")?;
+                out.schemars = true;
+                Ok(())
+            } else if meta.path.is_ident("utoipa") {
+                require_feature(cfg!(feature = "utoipa"), &meta, "utoipa")?;
+                out.utoipa = true;
+                Ok(())
+            } else if parse_common(&meta, &mut out.shared)? {
+                Ok(())
+            } else {
+                Err(meta.error(format!(
+                    "unknown `entity` option on the struct; expected one of: {CONTAINER_OPTIONS} \
+                     (field options such as `id` or `skip` go on fields)"
+                )))
+            }
+        });
+        if let Err(e) = res {
+            push_error(&mut errors, e);
+        }
+    }
+    if let Some(e) = errors {
+        return Err(e);
+    }
+    out.source_serde = serde_metas(attrs)
+        .into_iter()
+        .filter(|m| key(m).is_some_and(|k| k == "rename_all"))
+        .collect();
+    Ok(out)
+}
+
+/// Field `#[serde(..)]` keys, split by how they may be propagated.
+///
+/// * `always`: name-level keys that stay valid whatever the generated field's
+///   type is (`rename`, `alias`) and go to every generated type.
+/// * `typed`: keys that depend on the field's exact type (`with`, `default`,
+///   ...). They go only to types where the field keeps its declared type
+///   (response, create, delete), never to update/query fields, which are
+///   `Option`-wrapped and get their own `default`/`skip_serializing_if`.
+///
+/// Every other key is ignored: it concerns the source struct only.
+#[derive(Default)]
+pub struct FieldSerde {
+    pub always: Vec<Meta>,
+    pub typed: Vec<Meta>,
+}
+
+const ALWAYS: &[&str] = &["rename", "alias"];
+const TYPED: &[&str] = &[
+    "default",
+    "with",
+    "serialize_with",
+    "deserialize_with",
+    "skip_serializing_if",
+];
+
+pub fn parse_field_serde(attrs: &[Attribute]) -> FieldSerde {
+    let mut out = FieldSerde::default();
+    for m in serde_metas(attrs) {
+        match key(&m) {
+            Some(k) if ALWAYS.contains(&k.as_str()) => out.always.push(m),
+            Some(k) if TYPED.contains(&k.as_str()) => out.typed.push(m),
+            _ => {}
+        }
+    }
+    out
+}
+
+/// Parse every `#[serde(..)]` attribute. Attributes that do not parse as a
+/// meta list are skipped: serde's own derive reports those.
+fn serde_metas(attrs: &[Attribute]) -> Vec<Meta> {
+    attrs
+        .iter()
+        .filter(|a| a.path().is_ident("serde"))
+        .filter_map(|a| {
+            a.parse_args_with(Punctuated::<Meta, Token![,]>::parse_terminated)
+                .ok()
+        })
+        .flatten()
+        .collect()
+}
+
+fn key(m: &Meta) -> Option<String> {
+    m.path().get_ident().map(ToString::to_string)
+}
