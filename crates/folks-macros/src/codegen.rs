@@ -5,7 +5,7 @@ use std::collections::HashSet;
 
 use proc_macro_crate::{FoundCrate, crate_name};
 use proc_macro2::{Span, TokenStream};
-use quote::{ToTokens, quote};
+use quote::{ToTokens, quote, quote_spanned};
 use syn::ext::IdentExt;
 use syn::{Error, Generics, Ident, LitStr, Result, parse_quote};
 
@@ -13,7 +13,7 @@ use crate::generics::{param_names, subset};
 use crate::model::{Entity, Field, Target};
 use crate::names;
 use crate::rules::{self, Kind};
-use crate::types::idents_in;
+use crate::types::{idents_in, option_inner};
 
 pub fn expand(e: &Entity) -> Result<TokenStream> {
     let krate = resolve_crate()?;
@@ -24,7 +24,11 @@ pub fn expand(e: &Entity) -> Result<TokenStream> {
     let defs = generated.iter().map(|g| &g.tokens);
     let entity_impl = entity_impl(e, &generated, &krate);
     // `Target::ALL` starts with `Response`.
-    let from_impl = e.cfg.helpers.from.then(|| from_impl(e, &generated[0]));
+    let from_impl = e
+        .cfg
+        .helpers
+        .from
+        .then(|| from_impl(e, &generated[0], &krate));
     Ok(quote! { #(#defs)* #entity_impl #from_impl })
 }
 
@@ -68,7 +72,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
 
     let mut used = HashSet::new();
     for f in &fields {
-        used.extend(idents_in(f.ty));
+        used.extend(idents_in(f.ty_in(target)));
         if let Some(x) = &f.serde_as {
             used.extend(idents_in(x));
         }
@@ -190,10 +194,10 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
         quote!(#[doc = #doc])
     });
     let docs = &f.docs;
-    let ty = f.ty;
+    let ty = f.ty_in(target);
     let optional = f.optional_in(target);
     let maybe = f.is_maybe(target);
-    let inner = f.inner_ty();
+    let inner = f.inner_ty(target);
     let field_ty = if maybe {
         quote!(#krate::core::maybe::Maybe<#inner>)
     } else if f.wrapped_in(target) {
@@ -202,11 +206,17 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
         quote!(#ty)
     };
 
+    // A per-type `rename` replaces the field's own serde `rename`.
+    let own_rename = f.overrides[target.index()].rename.as_ref();
     let mut serde: Vec<TokenStream> = f
         .serde_always
         .iter()
+        .filter(|m| own_rename.is_none() || !m.path().is_ident("rename"))
         .map(ToTokens::to_token_stream)
         .collect();
+    if let Some(rename) = own_rename {
+        serde.push(quote!(rename = #rename));
+    }
     if target.wraps_in_option() {
         serde.push(quote!(default));
         if maybe {
@@ -223,9 +233,12 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
     } else {
         // `#[entity(default..)]` replaces any copied source `default`.
         let own_default = target == Target::Create && f.default.is_some();
+        // Typed keys (`with`, ...) were written for the declared type.
+        let retyped = f.ty_override(target).is_some();
         serde.extend(
             f.serde_typed
                 .iter()
+                .filter(|_| !retyped)
                 .filter(|m| !(own_default && m.path().is_ident("default")))
                 .map(ToTokens::to_token_stream),
         );
@@ -269,7 +282,11 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
 fn wire_name(e: &Entity, f: &Field, target: Target) -> String {
     names::wire_name(
         &f.ident.unraw().to_string(),
-        names::field_rename(&f.serde_always),
+        f.overrides[target.index()]
+            .rename
+            .as_ref()
+            .map(syn::LitStr::value)
+            .or_else(|| names::field_rename(&f.serde_always)),
         names::rename_all(&e.serde_attrs(target)),
     )
 }
@@ -369,9 +386,9 @@ fn field_checks(e: &Entity, f: &Field, target: Target, krate: &TokenStream) -> O
     let i = f.ident;
     let wire = LitStr::new(&wire_name(e, f, target), i.span());
     let label = quote!(__path);
-    let value_ty = f.inner_ty();
+    let value_ty = f.inner_ty(target);
 
-    let required = (target == Target::Create && f.optional_in_source())
+    let required = (target == Target::Create && f.optional_in_source(target))
         .then(|| f.rules.iter().find(|r| matches!(r.kind, Kind::Required)))
         .flatten()
         .map(|r| rules::emit_required(r, &quote!(&self.#i), &label, krate));
@@ -443,7 +460,7 @@ fn builder_impls(
         let required: Vec<_> = fields.iter().filter(|f| !f.optional_in(target)).collect();
         let params = required.iter().map(|f| {
             let i = f.ident;
-            let ty = f.ty;
+            let ty = f.ty_in(target);
             quote!(#i: impl ::core::convert::Into<#ty>)
         });
         let inits = fields.iter().map(|f| {
@@ -487,7 +504,7 @@ fn builder_impls(
 
 fn setters_for(f: &Field, target: Target, krate: &TokenStream) -> TokenStream {
     let i = f.ident;
-    let ty = f.inner_ty();
+    let ty = f.inner_ty(target);
     let maybe = f.is_maybe(target);
     let optional = f.optional_in(target);
     let name = i.unraw();
@@ -578,10 +595,19 @@ fn patch_impl(
         if f.is_maybe(Target::Update) {
             return quote!(#krate::core::maybe::Maybe::apply_to(self.#i, &mut __target.#i););
         }
-        let value = if f.optional_in_source() {
-            quote!(::core::option::Option::Some(__value))
+        let converted = match f.ty_override(Target::Update) {
+            Some((span, _)) => {
+                let krate = respan(krate, span);
+                quote_spanned!(span=>
+                    #krate::core::convert::ConvertField::convert_field(__value)
+                )
+            }
+            None => quote!(__value),
+        };
+        let value = if f.declared_optional() {
+            quote!(::core::option::Option::Some(#converted))
         } else {
-            quote!(__value)
+            converted
         };
         quote! {
             if let ::core::option::Option::Some(__value) = self.#i {
@@ -653,7 +679,7 @@ fn diff_impl(
                     ::core::option::Option::None => #krate::core::maybe::Maybe::Null,
                 }
             }
-        } else if f.optional_in_source() {
+        } else if f.declared_optional() {
             // A flat `Option<T>` can only express "now has this value".
             quote!(::core::clone::Clone::clone(&__new.#i))
         } else {
@@ -692,7 +718,7 @@ fn matches_impl(
 
     let checks = fields.iter().map(|f| {
         let i = f.ident;
-        let eq = if f.optional_in_source() {
+        let eq = if f.declared_optional() {
             quote!(__entity.#i.as_ref() == ::core::option::Option::Some(__v))
         } else {
             quote!(__entity.#i == *__v)
@@ -720,14 +746,49 @@ fn matches_impl(
     }
 }
 
+/// `value` (an entity field) converted to the field's `ty = ..` override in
+/// `target`; unchanged when there is no override. `Option` fields on both
+/// sides convert the inner value. The call is spanned at the override, so a
+/// missing conversion points at it.
+fn convert_to_override(
+    f: &Field,
+    target: Target,
+    value: TokenStream,
+    krate: &TokenStream,
+) -> TokenStream {
+    let Some((span, ty)) = f.ty_override(target) else {
+        return value;
+    };
+    let krate = respan(krate, span);
+    let convert = quote_spanned!(span=> #krate::core::convert::ConvertField::convert_field);
+    if f.declared_optional() && option_inner(ty).is_some() {
+        quote_spanned!(span=> ::core::option::Option::map(#value, #convert))
+    } else {
+        quote_spanned!(span=> #convert(#value))
+    }
+}
+
+/// `ts` with every token given `span`, so that an error in generated code
+/// that mixes user tokens and macro tokens is reported at the user's tokens.
+fn respan(ts: &TokenStream, span: Span) -> TokenStream {
+    ts.clone()
+        .into_iter()
+        .map(|mut t| {
+            t.set_span(span);
+            t
+        })
+        .collect()
+}
+
 /// `From<Entity> for Response`: moves the response fields out.
-fn from_impl(e: &Entity, response: &Generated) -> TokenStream {
+fn from_impl(e: &Entity, response: &Generated, krate: &TokenStream) -> TokenStream {
     let (impl_g, ty_g, where_c) = e.generics.split_for_impl();
     let entity = e.ident;
     let response_ty = response.ty();
     let moves = e.fields_for(Target::Response).into_iter().map(|f| {
         let i = f.ident;
-        quote!(#i: __entity.#i)
+        let value = convert_to_override(f, Target::Response, quote!(__entity.#i), krate);
+        quote!(#i: #value)
     });
     quote! {
         impl #impl_g ::core::convert::From<#entity #ty_g> for #response_ty #where_c {

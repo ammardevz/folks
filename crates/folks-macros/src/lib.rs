@@ -31,6 +31,24 @@
 //! The id can never join create/update, is always in delete, and
 //! `response`/`query` may be listed on it. `skip` + a list is an error.
 //!
+//! # Per-type overrides
+//!
+//! The list flags take options, so the API shape need not equal the stored
+//! shape: `#[entity(response(ty = String), create(ty = String, rename = "x"))]`.
+//! A flag with options includes the field exactly like the bare flag.
+//!
+//! * `ty = Type`: the field's type in that generated type only. It follows the
+//!   same `Option` policy as a declared type (update/query still wrap it in
+//!   `Option`). `From<Entity> for Response` converts with `Into` (`Option` on
+//!   both sides converts the inner value); `Patch` converts update values into
+//!   the entity's type. A missing `From`/`Into` is a compile error pointing at
+//!   the `ty`. `validate(..)` rules are checked and run against the overridden
+//!   type. Serde keys written for the declared type (`with`, `default`, ..) are
+//!   not copied to a retyped field. Not combinable with `serde_as`,
+//!   `clearable` (for `update`), or the struct-level `diff` / `matches`.
+//! * `rename = "x"`: the serde name in that type only, replacing a field-level
+//!   `#[serde(rename)]`. Validation errors use it.
+//!
 //! # `Option` policy
 //!
 //! * response/create/delete keep the declared type.

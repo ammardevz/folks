@@ -1,0 +1,5 @@
+error: `User::age`: `query(ty = ..)` cannot be combined with the struct-level `matches` option, which compares the entity's field with the request's; remove `matches` or the `ty` override
+ --> tests/ui/override_with_matches.rs:8:25
+  |
+8 |     #[entity(query(ty = u8))]
+  |                         ^^

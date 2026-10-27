@@ -1,0 +1,5 @@
+error: `length` cannot be applied to `u32`: it needs text or a collection (String, &str, Vec<_>, ...)
+ --> tests/ui/override_rule_mismatch.rs:8:49
+  |
+8 |     #[entity(create(ty = u32), update, validate(length(min = 1)))]
+  |                                                 ^^^^^^

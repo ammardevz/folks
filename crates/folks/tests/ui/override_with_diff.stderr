@@ -1,0 +1,5 @@
+error: `User::age`: `update(ty = ..)` cannot be combined with the struct-level `diff` option, which compares the entity's field with the request's; remove `diff` or the `ty` override
+ --> tests/ui/override_with_diff.rs:8:26
+  |
+8 |     #[entity(update(ty = u8))]
+  |                          ^^

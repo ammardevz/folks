@@ -1,4 +1,4 @@
-error: unknown `entity` field option; expected one of: id, skip, readonly, immutable, secret, response, create, update, delete, query, default, default = "..", clearable, clearable = false, serde_as = "..", validate(..)
+error: unknown `entity` field option; expected one of: id, skip, readonly, immutable, secret, response, create, update, delete, query (each also as `create(ty = Type, rename = "..")`), default, default = "..", clearable, clearable = false, serde_as = "..", validate(..)
  --> tests/ui/unknown_field_option.rs:7:14
   |
 7 |     #[entity(frobnicate)]

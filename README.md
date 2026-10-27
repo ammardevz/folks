@@ -276,6 +276,38 @@ The id can never be placed in create or update requests, and it is always part
 of the delete request. Conflicting combinations, such as `skip` with a list, are
 reported as compile errors at the relevant attribute.
 
+#### Per-type overrides
+
+The API shape does not have to equal the stored shape. Each list flag accepts
+options:
+
+```rust,ignore
+pub struct Email(String);                 // From<String> and Into<String> exist
+
+#[entity(
+    response(ty = String, rename = "emailAddress"),
+    create(ty = String),
+    update(ty = String),
+    validate(length(min = 3)),            // checked against `String`
+)]
+pub email: Email,
+```
+
+- `ty = Type` changes the field's type in that generated type only. The flag
+  still means "include the field"; the bare flag keeps working.
+- `rename = "x"` changes the serde name in that type only (and the name used in
+  validation errors).
+- `From<Entity> for Response` converts with `Into` (an `Option<A>` to
+  `Option<B>` converts the inner value); `apply_to` converts update values back.
+  If no conversion exists, the error points at the `ty` and says which `From`
+  is missing.
+- Validation rules are checked and run against the overridden type.
+- Not combinable with `serde_as`, with `clearable` on `update(ty = ..)`, or
+  with the struct-level `diff` (`update`) / `matches` (`query`).
+- Serde keys written for the declared type (`with`, `default = ..`) are not
+  copied to a retyped field. `#[entity(default = "path")]` is, so the function
+  must return the create type.
+
 #### Secrets
 
 Generated types derive `Debug`, which would print a password into your logs.

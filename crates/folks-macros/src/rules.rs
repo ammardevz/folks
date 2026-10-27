@@ -451,8 +451,12 @@ fn distance(a: &str, b: &str) -> usize {
 
 /// Where the field appears; decides which rules can have an effect.
 pub struct Ctx {
+    /// The field is in create requests.
     pub in_create: bool,
     pub in_any_request: bool,
+    /// The type being checked is the create request's field type. `required`
+    /// is enforced in create requests only, so it is judged against that type.
+    pub is_create_target: bool,
 }
 
 pub fn check(rules: &[Rule], declared: &Type, ctx: &Ctx, span: Span) -> Result<()> {
@@ -512,6 +516,9 @@ fn check_rule(rule: &Rule, ty: &Type, declared_option: bool, ctx: &Ctx, top: boo
                     rule.span,
                     "`required` cannot be used inside `each(..)`",
                 ));
+            }
+            if ctx.in_create && !ctx.is_create_target {
+                return Ok(());
             }
             if !declared_option {
                 return Err(Error::new(
@@ -796,6 +803,7 @@ mod tests {
             &Ctx {
                 in_create,
                 in_any_request: true,
+                is_create_target: in_create,
             },
             Span::call_site(),
         )
@@ -836,6 +844,7 @@ mod tests {
             &Ctx {
                 in_create: false,
                 in_any_request: false,
+                is_create_target: false,
             },
             Span::call_site(),
         );

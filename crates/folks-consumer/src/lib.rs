@@ -76,3 +76,35 @@ pub struct Login {
     #[entity(secret)]
     pub password: String,
 }
+
+/// A newtype stored in the entity but exposed as plain text.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Handle(pub String);
+
+impl From<String> for Handle {
+    fn from(value: String) -> Self {
+        Handle(value)
+    }
+}
+
+impl From<Handle> for String {
+    fn from(value: Handle) -> Self {
+        value.0
+    }
+}
+
+/// An entity whose API shape differs from its stored shape.
+#[derive(Entity)]
+pub struct Profile {
+    /// Primary key.
+    #[entity(id)]
+    pub id: u64,
+    /// Public handle.
+    #[entity(
+        response(ty = String, rename = "name"),
+        create(ty = String),
+        update(ty = String),
+        validate(length(min = 1))
+    )]
+    pub handle: Handle,
+}

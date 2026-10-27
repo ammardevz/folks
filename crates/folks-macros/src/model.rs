@@ -7,7 +7,7 @@ use syn::{
     Visibility, parse_quote,
 };
 
-use crate::attrs::{self, ContainerAttrs, FieldAttrs, push_error};
+use crate::attrs::{self, ContainerAttrs, FieldAttrs, TargetOverride, push_error};
 use crate::rules::{self, Ctx, Rule};
 use crate::types::option_inner;
 
@@ -111,6 +111,8 @@ pub struct Field<'a> {
     pub docs: Vec<&'a Attribute>,
     pub is_id: bool,
     pub targets: TargetSet,
+    /// Per-type `ty` / `rename` overrides, indexed by `Target::index()`.
+    pub overrides: [TargetOverride; 5],
     pub serde_always: Vec<Meta>,
     pub serde_typed: Vec<Meta>,
     pub serde_as: Option<Type>,
@@ -130,24 +132,47 @@ impl Field<'_> {
         self.clearable && target == Target::Update
     }
 
+    /// The declared type of the field in `target`: the `ty = ..` override if
+    /// there is one, else the entity's field type.
+    pub fn ty_in(&self, target: Target) -> &Type {
+        match &self.overrides[target.index()].ty {
+            Some((_, ty)) => ty,
+            None => self.ty,
+        }
+    }
+
+    /// Span of the `ty = ..` override in `target`, if any.
+    pub fn ty_override(&self, target: Target) -> Option<(Span, &Type)> {
+        self.overrides[target.index()]
+            .ty
+            .as_ref()
+            .map(|(span, ty)| (*span, ty))
+    }
+
     /// Does the macro add an `Option` layer around the declared type in `target`?
     pub fn wrapped_in(&self, target: Target) -> bool {
         target.wraps_in_option()
-            && (!self.optional_in_source() || (target == Target::Update && self.clearable))
+            && (!self.optional_in_source(target) || (target == Target::Update && self.clearable))
     }
 
     /// Is the field an `Option` in the generated type for `target`?
     pub fn optional_in(&self, target: Target) -> bool {
-        target.wraps_in_option() || option_inner(self.ty).is_some()
+        target.wraps_in_option() || self.optional_in_source(target)
     }
 
-    /// The declared type minus one `Option` layer.
-    pub fn inner_ty(&self) -> &Type {
-        option_inner(self.ty).unwrap_or(self.ty)
+    /// The declared type in `target` minus one `Option` layer.
+    pub fn inner_ty(&self, target: Target) -> &Type {
+        let ty = self.ty_in(target);
+        option_inner(ty).unwrap_or(ty)
     }
 
-    /// Is the declared type itself an `Option`?
-    pub fn optional_in_source(&self) -> bool {
+    /// Is the declared type in `target` itself an `Option`?
+    pub fn optional_in_source(&self, target: Target) -> bool {
+        option_inner(self.ty_in(target)).is_some()
+    }
+
+    /// Is the entity's own field an `Option`?
+    pub fn declared_optional(&self) -> bool {
         option_inner(self.ty).is_some()
     }
 }
@@ -229,6 +254,28 @@ impl<'a> Entity<'a> {
         }
         if let Some(e) = errors {
             return Err(e);
+        }
+
+        // `diff` and `matches` compare the entity's field with the request's
+        // field, which needs the same type.
+        for (enabled, target, option) in [
+            (container.diff, Target::Update, "diff"),
+            (container.matches, Target::Query, "matches"),
+        ] {
+            for f in fields.iter().filter(|_| enabled) {
+                if let Some((span, _)) = f.ty_override(target) {
+                    return Err(Error::new(
+                        span,
+                        format!(
+                            "`{}::{}`: `{}(ty = ..)` cannot be combined with the struct-level `{option}` option, which compares the entity's field with the request's; \
+                             remove `{option}` or the `ty` override",
+                            input.ident,
+                            f.ident,
+                            target.keyword()
+                        ),
+                    ));
+                }
+            }
         }
 
         let entity = Entity {
@@ -363,21 +410,23 @@ impl<'a> Field<'a> {
                 "`default` fills omitted fields of create requests, but this field is not in them",
             ));
         }
+        let at = format!("`{entity}::{ident}`");
+        if attrs.serde_as.is_some()
+            && let Some((span, _)) = Target::ALL
+                .iter()
+                .find_map(|t| attrs.overrides[t.index()].ty.as_ref())
+        {
+            return Err(Error::new(
+                *span,
+                format!(
+                    "{at}: `ty = ..` cannot be combined with `serde_as`, which is written for the field's declared type; remove one of them"
+                ),
+            ));
+        }
         let rules = match attrs.validate {
             None => Vec::new(),
             Some((span, rules)) => {
-                let ctx = Ctx {
-                    in_create: targets.contains(Target::Create),
-                    in_any_request: [
-                        Target::Create,
-                        Target::Update,
-                        Target::Delete,
-                        Target::Query,
-                    ]
-                    .into_iter()
-                    .any(|t| targets.contains(t)),
-                };
-                rules::check(&rules, &f.ty, &ctx, span)?;
+                check_rules(&rules, f, &attrs.overrides, targets, span)?;
                 rules
             }
         };
@@ -399,6 +448,14 @@ impl<'a> Field<'a> {
                         "`clearable` needs a field declared `Option<T>`: only nullable fields can be set to null",
                     ));
                 }
+                if let Some((ty_span, _)) = &attrs.overrides[Target::Update.index()].ty {
+                    return Err(Error::new(
+                        *ty_span,
+                        format!(
+                            "{at}: `clearable` cannot be combined with `update(ty = ..)`; remove one of them"
+                        ),
+                    ));
+                }
                 if attrs.serde_as.is_some() {
                     return Err(Error::new(
                         span,
@@ -413,6 +470,7 @@ impl<'a> Field<'a> {
                     && targets.contains(Target::Update)
                     && option_inner(&f.ty).is_some()
                     && attrs.serde_as.is_none()
+                    && attrs.overrides[Target::Update.index()].ty.is_none()
             }
         };
 
@@ -426,6 +484,7 @@ impl<'a> Field<'a> {
                 .collect(),
             is_id: attrs.id.is_some(),
             targets,
+            overrides: attrs.overrides,
             serde_always: serde.always,
             serde_typed: serde.typed,
             serde_as: attrs.serde_as,
@@ -436,6 +495,63 @@ impl<'a> Field<'a> {
         };
         Ok((field, attrs.id))
     }
+}
+
+/// Type-check the `validate(..)` rules against the field's type in every
+/// request type that contains it. Targets without a `ty` override share the
+/// entity's field type and are checked once.
+fn check_rules(
+    rules: &[Rule],
+    f: &syn::Field,
+    overrides: &[TargetOverride; 5],
+    targets: TargetSet,
+    span: Span,
+) -> Result<()> {
+    const REQUESTS: [Target; 4] = [
+        Target::Create,
+        Target::Update,
+        Target::Delete,
+        Target::Query,
+    ];
+    let in_create = targets.contains(Target::Create);
+    if !REQUESTS.iter().any(|t| targets.contains(*t)) {
+        let ctx = Ctx {
+            in_create,
+            in_any_request: false,
+            is_create_target: false,
+        };
+        return rules::check(rules, &f.ty, &ctx, span);
+    }
+
+    let mut errors = None;
+    // Targets using the entity's own type, then one check per override.
+    let base: Vec<Target> = REQUESTS
+        .into_iter()
+        .filter(|t| targets.contains(*t) && overrides[t.index()].ty.is_none())
+        .collect();
+    if !base.is_empty() {
+        let ctx = Ctx {
+            in_create,
+            in_any_request: true,
+            is_create_target: base.contains(&Target::Create),
+        };
+        if let Err(e) = rules::check(rules, &f.ty, &ctx, span) {
+            push_error(&mut errors, e);
+        }
+    }
+    for t in REQUESTS {
+        if let (true, Some((_, ty))) = (targets.contains(t), &overrides[t.index()].ty) {
+            let ctx = Ctx {
+                in_create,
+                in_any_request: true,
+                is_create_target: t == Target::Create,
+            };
+            if let Err(e) = rules::check(rules, ty, &ctx, span) {
+                push_error(&mut errors, e);
+            }
+        }
+    }
+    errors.map_or(Ok(()), Err)
 }
 
 /// Inclusion rules.

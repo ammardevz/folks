@@ -6,7 +6,7 @@ use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
 use syn::{
     Attribute, Error, Ident, LitBool, LitStr, Meta, Path, Result, Token, Type, Visibility,
-    parenthesized, parse_quote,
+    parenthesized, parse_quote, token,
 };
 
 use crate::model::{Helpers, Target};
@@ -20,8 +20,17 @@ pub fn push_error(acc: &mut Option<Error>, e: Error) {
     }
 }
 
-const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, response, create, update, delete, query, \
-     default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
+const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, response, create, update, delete, query \
+     (each also as `create(ty = Type, rename = \"..\")`), default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
+
+/// Options inside a per-type field flag, e.g. `create(ty = X, rename = "x")`.
+#[derive(Default, Clone)]
+pub struct TargetOverride {
+    /// `ty = ..`: the field's type in this generated type only.
+    pub ty: Option<(Span, Type)>,
+    /// `rename = ".."`: the serde name in this generated type only.
+    pub rename: Option<LitStr>,
+}
 
 #[derive(Default)]
 pub struct FieldAttrs {
@@ -31,6 +40,8 @@ pub struct FieldAttrs {
     pub immutable: Option<Span>,
     pub secret: Option<Span>,
     pub targets: Vec<(Target, Span)>,
+    /// Indexed by `Target::index()`.
+    pub overrides: [TargetOverride; 5],
     pub default: Option<(Span, Option<LitStr>)>,
     pub clearable: Option<(Span, bool)>,
     pub serde_as: Option<Type>,
@@ -91,6 +102,42 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                     ));
                 }
                 out.targets.push((t, span));
+                if meta.input.peek(token::Paren) {
+                    let probe = meta.input.fork();
+                    let inner;
+                    parenthesized!(inner in probe);
+                    if inner.is_empty() {
+                        return Err(Error::new(
+                            span,
+                            format!(
+                                "`{0}()` is empty; write `{0}` or `{0}(ty = Type, rename = \"..\")`",
+                                t.keyword()
+                            ),
+                        ));
+                    }
+                    let slot = &mut out.overrides[t.index()];
+                    meta.parse_nested_meta(|m| {
+                        if m.path.is_ident("ty") {
+                            if slot.ty.is_some() {
+                                return Err(m.error("duplicate `ty` option"));
+                            }
+                            let ty: Type = m.value()?.parse()?;
+                            slot.ty = Some((ty.span(), ty));
+                            Ok(())
+                        } else if m.path.is_ident("rename") {
+                            if slot.rename.is_some() {
+                                return Err(m.error("duplicate `rename` option"));
+                            }
+                            slot.rename = Some(m.value()?.parse()?);
+                            Ok(())
+                        } else {
+                            Err(m.error(format!(
+                                "unknown option for `{}(..)`; expected `ty = Type` or `rename = \"..\"`",
+                                t.keyword()
+                            )))
+                        }
+                    })?;
+                }
                 Ok(())
             } else if meta.path.is_ident("serde_as") {
                 if out.serde_as.is_some() {

@@ -1,0 +1,5 @@
+error: `User::age`: `ty = ..` cannot be combined with `serde_as`, which is written for the field's declared type; remove one of them
+ --> tests/ui/override_with_serde_as.rs:7:26
+  |
+7 |     #[entity(create(ty = String), serde_as = "folks::serde_with::DisplayFromStr")]
+  |                          ^^^^^^

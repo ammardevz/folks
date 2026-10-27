@@ -1,0 +1,11 @@
+error[E0277]: cannot convert `f64` to `u8` for a field with a `ty = ..` override
+ --> tests/ui/override_no_conversion_update.rs:7:36
+  |
+7 |     #[entity(response, update(ty = f64))]
+  |                                    ^^^
+  |                                    |
+  |                                    `f64` doesn't satisfy the trait bound
+  |                                    no conversion from `f64` to `u8`
+  |
+  = help: the trait `ConvertField<u8>` is not implemented for `f64`
+  = note: a `ty = ..` override needs `f64: Into<u8>`: implement `From<f64> for u8`, or change the override

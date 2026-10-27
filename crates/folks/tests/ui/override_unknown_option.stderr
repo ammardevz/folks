@@ -1,0 +1,5 @@
+error: unknown option for `create(..)`; expected `ty = Type` or `rename = ".."`
+ --> tests/ui/override_unknown_option.rs:7:21
+  |
+7 |     #[entity(create(name = "x"))]
+  |                     ^^^^

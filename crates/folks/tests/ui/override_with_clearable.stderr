@@ -1,0 +1,5 @@
+error: `User::bio`: `clearable` cannot be combined with `update(ty = ..)`; remove one of them
+ --> tests/ui/override_with_clearable.rs:7:26
+  |
+7 |     #[entity(update(ty = Option<String>), clearable)]
+  |                          ^^^^^^

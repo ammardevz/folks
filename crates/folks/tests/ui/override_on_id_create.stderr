@@ -1,0 +1,5 @@
+error: the id field cannot be included in the create request
+ --> tests/ui/override_on_id_create.rs:5:18
+  |
+5 |     #[entity(id, create(ty = String))]
+  |                  ^^^^^^

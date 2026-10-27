@@ -1,0 +1,5 @@
+error: duplicate `ty` option
+ --> tests/ui/override_duplicate.rs:7:30
+  |
+7 |     #[entity(create(ty = u8, ty = u16))]
+  |                              ^^
