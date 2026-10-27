@@ -18,11 +18,11 @@
 //! // Generated: UserResponse, UserCreateRequest, UserUpdateRequest,
 //! // UserDeleteRequest, UserQueryRequest.
 //! let create = UserCreateRequest { name: String::new() };
-//! assert!(create.is_invalid());
+//! assert!(create.validate().is_err());
 //!
 //! let update = UserUpdateRequest { name: None };
 //! assert!(update.is_empty()); // nothing to change
-//! assert!(UserDeleteRequest { id: 1 }.is_valid());
+//! assert!(UserDeleteRequest { id: 1 }.validate().is_ok());
 //!
 //! // Fluent setters, patching and conversion are generated too.
 //! let mut user = User { id: 1, name: "old".into() };
@@ -42,7 +42,7 @@ extern crate self as folks;
 
 pub mod core;
 
-pub use self::core::entity::{Entity, Validatable};
+pub use self::core::entity::Entity;
 pub use self::core::error::{Error, FieldError};
 pub use self::core::filter::Filter;
 pub use self::core::maybe::Maybe;
@@ -65,7 +65,9 @@ pub use regex;
 pub use utoipa;
 
 /// `use folks::prelude::*;` brings in everything day-to-day code needs: the
-/// derive and trait (both named `Entity`), `Validatable`, `Patch`, `Page`.
+/// derive and trait (both named `Entity`), `garde::Validate` (for
+/// `.validate()`), `Patch`, `Page`.
 pub mod prelude {
-    pub use crate::{Diff, Entity, Filter, Maybe, Page, PageRequest, Patch, Validatable};
+    pub use crate::garde::Validate;
+    pub use crate::{Diff, Entity, Filter, Maybe, Page, PageRequest, Patch};
 }

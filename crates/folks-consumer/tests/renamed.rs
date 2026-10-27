@@ -2,7 +2,8 @@
 //! and has no direct `serde` / `serde_with` / `garde` dependency.
 
 use folks_consumer::*;
-use my_folks::{Diff, Error, Filter, Maybe, Patch, Validatable};
+use my_folks::garde::Validate;
+use my_folks::{Diff, Error, Filter, Maybe, Patch};
 
 fn customer() -> Customer {
     Customer {
@@ -19,10 +20,10 @@ fn customer() -> Customer {
 #[test]
 fn derive_works_through_a_renamed_dependency() {
     let c = CustomerCreateRequest::new("Ann", vec!["a".to_string()], 30u8).with_bio("hi");
-    assert!(c.is_valid());
+    assert!(c.validate().is_ok());
 
     let bad = CustomerCreateRequest::new("", vec![String::new()], 200u8);
-    match bad.validate() {
+    match bad.validate().map_err(Error::from) {
         Err(Error::Invalid(errors)) => {
             let fields: Vec<_> = errors.iter().map(|e| e.field.as_str()).collect();
             assert_eq!(fields, ["name", "tags[0]", "age"]);

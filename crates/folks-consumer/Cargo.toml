@@ -10,5 +10,13 @@ publish = false
 my_folks = { package = "folks", path = "../folks" }
 
 [dev-dependencies]
+# Only for the `axum_valid` test: proves the generated types work with the
+# garde extractors of the web ecosystem.
+axum = { version = "0.8", default-features = false, features = ["json"] }
+axum-valid = { version = "0.25", default-features = false, features = [
+    "garde",
+    "json",
+] }
+tokio = { version = "1", features = ["macros", "rt"] }
 serde_json = "1"
 uuid = { version = "1", features = ["serde"] }

@@ -3,7 +3,8 @@
 //!
 //! For `struct User` it generates `UserResponse`, `UserCreateRequest`,
 //! `UserUpdateRequest`, `UserDeleteRequest` and `UserQueryRequest`, all
-//! `Debug + Clone + Serialize + Deserialize + Validatable`, and implements
+//! `Debug + Clone + Serialize + Deserialize`, the request types also
+//! `garde::Validate<Context = ()>`, and implements
 //! `folks::core::entity::Entity` for `User`.
 //!
 //! # Field inclusion
@@ -53,8 +54,12 @@
 //! # Validation
 //!
 //! `#[entity(validate(rule, rule, ..))]` runs rules in the request types that
-//! contain the field; `Validatable::validate()` collects **every** failure as
-//! `Error::Invalid(Vec<FieldError>)` (`field`, `message`). Rules are parsed
+//! contain the field. The request types implement `garde::Validate`
+//! (re-exported as `folks::garde`), so `.validate()` collects **every**
+//! failure in a `garde::Report`; `folks::Error` converts from it
+//! (`Error::Invalid(Vec<FieldError>)`). Failures are reported under the field's
+//! *serialized* name (serde `rename` / `rename_all`), `tags[1]` for collection
+//! elements. Rules are parsed
 //! and checked against the field's type at compile time, run garde's rule
 //! functions through `folks::garde` (no direct garde dependency or version to
 //! match), and report problems at the offending rule.
@@ -84,9 +89,12 @@
 //!   clearable `Maybe<T>`) they run only when a value is present, so `null`,
 //!   unset and `None` are never "invalid".
 //! * Rules on the id apply to delete and query requests.
-//! * An update request that sets nothing fails with the request-level
-//!   `Error::ValidationError`; empty create and query requests are valid.
-//! * `is_empty()` is true when there are no required fields and every
+//! * An update request that sets nothing fails with a root-level (empty path)
+//!   garde error, which `folks::Error` turns into `Error::ValidationError`;
+//!   empty create and query requests are valid.
+//! * `custom(path)` keeps the signature `fn(&T) -> Result<(), E: Display>`;
+//!   the macro adapts it to garde.
+//! * The inherent `is_empty()` is true when there are no required fields and every
 //!   optional field is unset.
 //!
 //! # Generated helpers
@@ -176,6 +184,7 @@ mod attrs;
 mod codegen;
 mod generics;
 mod model;
+mod names;
 mod rules;
 mod types;
 

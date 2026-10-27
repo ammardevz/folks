@@ -1,21 +1,14 @@
-use crate::core::error::Error;
+use garde::Validate;
 
+/// Ties an entity to the request and response types generated for it.
+///
+/// The request types implement [`garde::Validate`] with no context, so they
+/// work with every garde integration (`axum-valid`, `actix-web-garde`, ...).
 pub trait Entity {
     type EntityId: Send + Sync;
     type EntityResponse: Send + Sync;
-    type EntityCreateRequest: Send + Sync + Validatable;
-    type EntityUpdateRequest: Send + Sync + Validatable;
-    type EntityDeleteRequest: Send + Sync + Validatable;
-    type EntityQueryRequest: Send + Sync + Validatable;
-}
-
-pub trait Validatable {
-    fn is_empty(&self) -> bool;
-    fn validate(&self) -> Result<(), Error>;
-    fn is_valid(&self) -> bool {
-        self.validate().is_ok()
-    }
-    fn is_invalid(&self) -> bool {
-        !self.is_valid()
-    }
+    type EntityCreateRequest: Send + Sync + Validate<Context = ()>;
+    type EntityUpdateRequest: Send + Sync + Validate<Context = ()>;
+    type EntityDeleteRequest: Send + Sync + Validate<Context = ()>;
+    type EntityQueryRequest: Send + Sync + Validate<Context = ()>;
 }

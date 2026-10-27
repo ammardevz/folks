@@ -1,5 +1,6 @@
-use folks::core::entity::{Entity as EntityTrait, Validatable};
+use folks::core::entity::Entity as EntityTrait;
 use folks::core::error::Error;
+use folks::garde::Validate;
 use folks::{Entity, serde_with::DisplayFromStr};
 use uuid::Uuid;
 
@@ -77,12 +78,12 @@ fn multi_word_names() {
 fn id_only_entity_semantics() {
     let create = BlogPostCommentCreateRequest {};
     assert!(create.is_empty());
-    assert!(create.is_valid());
+    assert!(create.validate().is_ok());
 
     // Nothing can be updated, so an update can never be valid.
     let update = BlogPostCommentUpdateRequest {};
     assert!(update.is_empty());
-    assert!(update.is_invalid());
+    assert!(update.validate().is_err());
 
     assert!(!BlogPostCommentDeleteRequest { id: 1 }.is_empty());
     assert!(BlogPostCommentQueryRequest { id: None }.is_empty());
@@ -430,8 +431,8 @@ pub struct Tag {
 }
 
 /// `(field, message)` pairs of a failed validation.
-fn failures(r: Result<(), Error>) -> Vec<(String, String)> {
-    match r {
+fn failures(r: Result<(), folks::garde::Report>) -> Vec<(String, String)> {
+    match r.map_err(Error::from) {
         Err(Error::Invalid(errors)) => errors.into_iter().map(|e| (e.field, e.message)).collect(),
         other => panic!("expected field errors, got {other:?}"),
     }
@@ -460,12 +461,15 @@ fn create_runs_the_rules() {
         failures(create("x", Some("abcdefg")).validate()),
         [("note".to_string(), "length is greater than 5".to_string())]
     );
-    assert!(create("x", Some("abc")).is_valid());
+    assert!(create("x", Some("abc")).validate().is_ok());
 }
 
 #[test]
 fn all_failures_are_reported_together_and_structured() {
-    let err = create("a b", Some("abcdefg")).validate().unwrap_err();
+    let err = create("a b", Some("abcdefg"))
+        .validate()
+        .map_err(Error::from)
+        .unwrap_err();
     let fields = err.fields();
     assert_eq!(fields.len(), 2);
     assert_eq!(
@@ -488,12 +492,19 @@ fn update_requires_a_field_and_validates_values() {
         free: None,
     };
     assert!(empty.is_empty());
-    match empty.validate() {
+    match empty.validate().map_err(Error::from) {
         // Not tied to a single field, so it is a request-level error.
         Err(Error::ValidationError(m)) => assert!(m.contains("must set at least one field"), "{m}"),
         other => panic!("unexpected: {other:?}"),
     }
-    assert!(empty.validate().unwrap_err().fields().is_empty());
+    assert!(
+        empty
+            .validate()
+            .map_err(Error::from)
+            .unwrap_err()
+            .fields()
+            .is_empty()
+    );
 
     // Rules apply to the inner value of the `Option`-wrapped update field.
     let ok = TagUpdateRequest {
@@ -502,7 +513,7 @@ fn update_requires_a_field_and_validates_values() {
         alias: None,
         free: None,
     };
-    assert!(ok.is_valid());
+    assert!(ok.validate().is_ok());
     let bad = TagUpdateRequest {
         name: Some("".into()),
         note: None,
@@ -520,7 +531,7 @@ fn update_requires_a_field_and_validates_values() {
         alias: None,
         free: Some("anything".into()),
     };
-    assert!(free.is_valid());
+    assert!(free.validate().is_ok());
     // `custom` on a non-Option field sees the plain `String` in update requests too.
     let spaced = TagUpdateRequest {
         name: Some("a b".into()),
@@ -540,7 +551,7 @@ fn update_requires_a_field_and_validates_values() {
 
 #[test]
 fn id_rules_apply_to_delete_and_query() {
-    assert!(TagDeleteRequest { id: 1 }.is_valid());
+    assert!(TagDeleteRequest { id: 1 }.validate().is_ok());
     assert_eq!(
         failures(TagDeleteRequest { id: 0 }.validate()),
         [("id".to_string(), "lower than 1".to_string())]
@@ -555,7 +566,7 @@ fn id_rules_apply_to_delete_and_query() {
         alias: None,
         free: None,
     };
-    assert!(q.is_empty() && q.is_valid());
+    assert!(q.is_empty() && q.validate().is_ok());
     let q = TagQueryRequest {
         id: Some(0),
         name: None,
@@ -563,7 +574,7 @@ fn id_rules_apply_to_delete_and_query() {
         alias: None,
         free: None,
     };
-    assert!(q.is_invalid());
+    assert!(q.validate().is_err());
 }
 
 #[derive(Entity)]
@@ -581,7 +592,7 @@ fn rules_work_on_generic_entities() {
         stars: 3,
         payload: "p".into(),
     };
-    assert!(ok.is_valid());
+    assert!(ok.validate().is_ok());
     let bad: RatedCreateRequest<String> = RatedCreateRequest {
         stars: 9,
         payload: "p".into(),

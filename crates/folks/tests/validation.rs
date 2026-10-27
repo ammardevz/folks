@@ -3,8 +3,8 @@
 use folks::prelude::*;
 use folks::{Error, FieldError};
 
-fn fields(r: Result<(), Error>) -> Vec<(String, String)> {
-    match r {
+fn fields(r: Result<(), folks::garde::Report>) -> Vec<(String, String)> {
+    match r.map_err(Error::from) {
         Err(Error::Invalid(e)) => e.into_iter().map(|e| (e.field, e.message)).collect(),
         other => panic!("expected field errors, got {other:?}"),
     }
@@ -18,7 +18,7 @@ fn short_list(v: &[String]) -> Result<(), String> {
     }
 }
 
-fn names(r: Result<(), Error>) -> Vec<String> {
+fn names(r: Result<(), folks::garde::Report>) -> Vec<String> {
     fields(r).into_iter().map(|(f, _)| f).collect()
 }
 
@@ -210,15 +210,16 @@ fn rules_hold_in_update_and_query_for_present_values_only() {
     let ok = EverythingUpdateRequest::default()
         .with_short("abc")
         .with_small(3u8);
-    assert!(ok.is_valid());
+    assert!(ok.validate().is_ok());
     // `required` is a create-only rule: absent in an update is fine.
     assert!(
         EverythingUpdateRequest::default()
             .with_exact("abc")
-            .is_valid()
+            .validate()
+            .is_ok()
     );
 
-    assert!(EverythingQueryRequest::default().is_valid());
+    assert!(EverythingQueryRequest::default().validate().is_ok());
     assert_eq!(
         names(
             EverythingQueryRequest::default()
@@ -266,11 +267,21 @@ fn rules_reach_into_maybe_and_skip_unset_and_null() {
         names(ProfileUpdateRequest::default().with_phone("12a").validate()),
         ["phone"]
     );
-    assert!(ProfileUpdateRequest::default().with_phone("123").is_valid());
+    assert!(
+        ProfileUpdateRequest::default()
+            .with_phone("123")
+            .validate()
+            .is_ok()
+    );
     // Null clears the field: nothing to validate.
-    assert!(ProfileUpdateRequest::default().clear_phone().is_valid());
+    assert!(
+        ProfileUpdateRequest::default()
+            .clear_phone()
+            .validate()
+            .is_ok()
+    );
     // Unset alone is just an empty update.
-    assert!(ProfileUpdateRequest::default().is_invalid());
+    assert!(ProfileUpdateRequest::default().validate().is_err());
 }
 
 // -------------------------------------------------------------- &str, generics
@@ -296,7 +307,8 @@ fn borrowed_str_fields_and_generics() {
             name: "x",
             extra: 1u8
         }
-        .is_valid()
+        .validate()
+        .is_ok()
     );
 }
 
@@ -321,7 +333,8 @@ mod email_rule {
             ContactCreateRequest {
                 mail: "a@b.co".into()
             }
-            .is_valid()
+            .validate()
+            .is_ok()
         );
         assert_eq!(
             names(
@@ -354,7 +367,8 @@ mod url_rule {
             LinkCreateRequest {
                 href: "https://example.com/x".into()
             }
-            .is_valid()
+            .validate()
+            .is_ok()
         );
         assert_eq!(
             names(
@@ -387,7 +401,8 @@ mod pattern_rule {
             SlugCreateRequest {
                 slug: "my-post-1".into()
             }
-            .is_valid()
+            .validate()
+            .is_ok()
         );
         assert_eq!(
             names(

@@ -1,6 +1,6 @@
 //! `From`, `Default` + setters, `apply_to`, extra derives, shorthands, `Page`.
 
-use folks::{Entity, Page, PageRequest, Patch, Validatable};
+use folks::{Entity, Page, PageRequest, Patch};
 use uuid::Uuid;
 
 #[derive(Entity, Debug, Clone, PartialEq)]

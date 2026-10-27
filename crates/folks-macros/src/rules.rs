@@ -613,9 +613,9 @@ fn lit_usize(n: u64) -> Literal {
 }
 
 /// Statements that run `rules` against `value` (an expression of type `&T`),
-/// pushing a `FieldError` named by `label` (an expression of type `&str`)
-/// onto the in-scope `__errors` for every failure. `required` is handled by
-/// the caller because it inspects the `Option` itself.
+/// appending a garde error at `label` (an expression of type
+/// `garde::Path`) to the in-scope `__report` for every failure. `required` is
+/// handled by the caller because it inspects the `Option` itself.
 pub fn emit(
     rules: &[Rule],
     ty: &Type,
@@ -633,7 +633,7 @@ pub fn emit(
 fn push(span: Span, call: TokenStream, label: &TokenStream, krate: &TokenStream) -> TokenStream {
     quote_spanned! {span=>
         if let ::core::result::Result::Err(__e) = #call {
-            __errors.push(#krate::core::error::FieldError::new(#label, __e));
+            #krate::garde::Report::append(__report, ::core::clone::Clone::clone(&#label), __e);
         }
     }
 }
@@ -701,17 +701,20 @@ fn emit_one(
                 #rules::pattern::apply(#value, (&__RE,))
             }
         },
-        Kind::Custom(path) => quote_spanned!(span=> #path(#value)),
+        // Custom functions return any `Display` error; adapt it to garde's.
+        Kind::Custom(path) => quote_spanned!(span=>
+            #path(#value).map_err(|__e| #krate::garde::Error::new(::std::string::ToString::to_string(&__e)))
+        ),
         Kind::Each(inner) => {
             let elem: Type = element_type(ty)
                 .cloned()
                 .unwrap_or_else(|| syn::parse_quote!(_));
             let item = quote!(__item);
-            let item_label = quote!(__label.as_str());
+            let item_label = quote!(__item_path);
             let body = emit(inner, &elem, &item, &item_label, krate);
             return Some(quote_spanned! {span=>
                 for (__i, __item) in (#value).iter().enumerate() {
-                    let __label = ::std::format!("{}[{}]", #label, __i);
+                    let __item_path = #krate::garde::Path::join(&#label, __i);
                     #body
                 }
             });
@@ -720,7 +723,7 @@ fn emit_one(
     Some(push(span, call, label, krate))
 }
 
-/// `required::apply(&self.field, ())` pushed as a `FieldError`.
+/// `required::apply(&self.field, ())` appended to the report.
 pub fn emit_required(
     rule: &Rule,
     access: &TokenStream,

@@ -1,4 +1,4 @@
-//! Token generation: one struct + `Validatable` impl per target, then the
+//! Token generation: one struct + `garde::Validate` impl per target, then the
 //! `Entity` impl tying them together.
 
 use std::collections::HashSet;
@@ -11,6 +11,7 @@ use syn::{Error, Generics, Ident, LitStr, Result, parse_quote};
 
 use crate::generics::{param_names, subset};
 use crate::model::{Entity, Field, Target};
+use crate::names;
 use crate::rules::{self, Kind};
 use crate::types::idents_in;
 
@@ -108,7 +109,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         let path = LitStr::new(&quote!(#krate::schemars).to_string(), Span::call_site());
         quote!(#[schemars(crate = #path)])
     });
-    let validatable = validatable_impl(&name, &generics, &fields, target, krate);
+    let validatable = validatable_impl(e, &name, &generics, &fields, target, krate);
     let extras = match target {
         Target::Create | Target::Update | Target::Query => {
             builder_impls(e, target, &name, &generics, &fields, krate)
@@ -230,9 +231,21 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
     }
 }
 
-/// `Validatable` for the four request types. Responses are not validated:
-/// they describe data that already exists.
+/// The name `f` has on the wire in `target`, which is what clients see in
+/// validation errors: serde `rename` first, then `rename_all`.
+fn wire_name(e: &Entity, f: &Field, target: Target) -> String {
+    names::wire_name(
+        &f.ident.unraw().to_string(),
+        names::field_rename(&f.serde_always),
+        names::rename_all(&e.serde_attrs(target)),
+    )
+}
+
+/// `garde::Validate` for the four request types, plus an inherent
+/// `is_empty`. Responses are not validated: they describe data that already
+/// exists.
 fn validatable_impl(
+    e: &Entity,
     name: &Ident,
     generics: &Generics,
     fields: &[&Field],
@@ -243,8 +256,7 @@ fn validatable_impl(
         return quote!();
     }
     let (impl_g, ty_g, where_c) = generics.split_for_impl();
-    let validatable = quote!(#krate::core::entity::Validatable);
-    let error = quote!(#krate::core::error::Error);
+    let garde = quote!(#krate::garde);
 
     // No required field and every optional field unset (vacuously true for
     // a struct without fields).
@@ -266,41 +278,49 @@ fn validatable_impl(
     let empty_guard = (target == Target::Update).then(|| {
         let msg = format!("`{name}` must set at least one field");
         quote! {
-            if #validatable::is_empty(self) {
-                return ::core::result::Result::Err(#error::ValidationError(
-                    ::std::string::ToString::to_string(#msg),
-                ));
+            if self.is_empty() {
+                #garde::Report::append(
+                    __report,
+                    __parent(),
+                    #garde::Error::new(#msg),
+                );
+                return;
             }
         }
     });
 
     let checks: Vec<TokenStream> = fields
         .iter()
-        .filter_map(|f| field_checks(f, target, krate))
+        .filter_map(|f| field_checks(e, f, target, krate))
         .collect();
-    let rules = if checks.is_empty() {
-        quote!(::core::result::Result::Ok(()))
-    } else {
-        quote! {
-            let mut __errors = ::std::vec::Vec::new();
-            #(#checks)*
-            if __errors.is_empty() {
-                ::core::result::Result::Ok(())
-            } else {
-                ::core::result::Result::Err(#error::Invalid(__errors))
-            }
-        }
+
+    let empty_doc = match target {
+        Target::Update => "Is nothing set? An empty update fails validation.",
+        _ => "Is there no required field and is every optional field unset?",
     };
 
     quote! {
-        impl #impl_g #validatable for #name #ty_g #where_c {
-            fn is_empty(&self) -> bool {
+        #[allow(dead_code)]
+        impl #impl_g #name #ty_g #where_c {
+            #[doc = #empty_doc]
+            #[must_use]
+            pub fn is_empty(&self) -> bool {
                 #is_empty
             }
+        }
 
-            fn validate(&self) -> ::core::result::Result<(), #error> {
+        impl #impl_g #garde::Validate for #name #ty_g #where_c {
+            type Context = ();
+
+            #[allow(unused_variables)]
+            fn validate_into(
+                &self,
+                __ctx: &Self::Context,
+                __parent: &mut dyn ::core::ops::FnMut() -> #garde::Path,
+                __report: &mut #garde::Report,
+            ) {
                 #empty_guard
-                #rules
+                #(#checks)*
             }
         }
     }
@@ -309,13 +329,13 @@ fn validatable_impl(
 /// The checks for one field's `validate(..)` rules in one request type.
 /// Optional values are checked only when present (`Some` / `Maybe::Set`);
 /// `required` is enforced on the `Option` itself, in create requests only.
-fn field_checks(f: &Field, target: Target, krate: &TokenStream) -> Option<TokenStream> {
+fn field_checks(e: &Entity, f: &Field, target: Target, krate: &TokenStream) -> Option<TokenStream> {
     if f.rules.is_empty() {
         return None;
     }
     let i = f.ident;
-    let label = LitStr::new(&i.unraw().to_string(), i.span());
-    let label = quote!(#label);
+    let wire = LitStr::new(&wire_name(e, f, target), i.span());
+    let label = quote!(__path);
     let value_ty = f.inner_ty();
 
     let required = (target == Target::Create && f.optional_in_source())
@@ -344,7 +364,13 @@ fn field_checks(f: &Field, target: Target, krate: &TokenStream) -> Option<TokenS
 
     match (required, value_checks) {
         (None, None) => None,
-        (r, v) => Some(quote!(#r #v)),
+        (r, v) => Some(quote! {
+            {
+                let __path = #krate::garde::Path::join(&__parent(), #wire);
+                #r
+                #v
+            }
+        }),
     }
 }
 

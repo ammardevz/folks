@@ -1,6 +1,7 @@
 //! Container knobs (`names`, `no`, `vis`, `serde`), create `default`, `clearable`.
 
-use folks::{Entity, Maybe, Patch, Validatable};
+use folks::garde::Validate;
+use folks::{Entity, Maybe, Patch};
 
 // ------------------------------------------------------------------ names
 
@@ -216,7 +217,7 @@ fn clearable_setters_and_apply_to() {
     // Clearing counts as a supplied field.
     let clear = ProfileUpdateRequest::default().clear_bio();
     assert!(!clear.is_empty());
-    assert!(clear.is_valid());
+    assert!(clear.validate().is_ok());
 }
 
 mod clearable_validation {
@@ -235,11 +236,17 @@ mod clearable_validation {
         assert!(
             BioUpdateRequest::default()
                 .with_text("abcdefg")
-                .is_invalid()
+                .validate()
+                .is_err()
         );
-        assert!(BioUpdateRequest::default().with_text("abc").is_valid());
+        assert!(
+            BioUpdateRequest::default()
+                .with_text("abc")
+                .validate()
+                .is_ok()
+        );
         // Null is a valid (clearing) update; unset alone is an empty one.
-        assert!(BioUpdateRequest::default().clear_text().is_valid());
-        assert!(BioUpdateRequest::default().is_invalid());
+        assert!(BioUpdateRequest::default().clear_text().validate().is_ok());
+        assert!(BioUpdateRequest::default().validate().is_err());
     }
 }

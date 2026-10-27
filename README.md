@@ -44,7 +44,8 @@ error prone.
 with one field marked `#[entity(id)]`, it generates all five types and
 implements `folks::core::entity::Entity` for the struct. The generated types
 derive `Debug`, `Clone`, `Serialize` and `Deserialize`, and the request types
-implement `Validatable`.
+implement `garde::Validate`, so they work with `axum-valid`, `actix-web-garde`
+and every other garde integration.
 
 Every behaviour has a default. Configuration is opt-in and layered: shared
 options apply to all generated types, and per-type blocks override only what
@@ -88,7 +89,7 @@ differs.
 │   │   ├── src
 │   │   │   ├── lib.rs          Re-exports, prelude
 │   │   │   └── core
-│   │   │       ├── entity.rs   Entity and Validatable traits
+│   │   │       ├── entity.rs   Entity trait
 │   │   │       ├── error.rs    Error and FieldError
 │   │   │       ├── filter.rs   Filter trait
 │   │   │       ├── maybe.rs    Maybe<T> (unset / null / value)
@@ -198,10 +199,10 @@ fn example(mut user: User) -> Result<(), folks::Error> {
     let create = UserCreateRequest::new("Ann", 30u8).with_bio("Systems programmer");
     create.validate()?;
 
-    // Every failed rule is reported, with the field name.
+    // Every failed rule is reported, under the field's serialized name.
     let invalid = UserCreateRequest::new("", 5u8);
     assert_eq!(
-        invalid.validate().unwrap_err().to_string(),
+        folks::Error::from(invalid.validate().unwrap_err()).to_string(),
         "validation error: name: length is lower than 1; age: lower than 13"
     );
 
@@ -252,7 +253,7 @@ follow the entity name and apply to multi-word names as well
 
 Exactly one field must carry `#[entity(id)]`. A missing or duplicated id is a
 compile error. Responses are not validated; only the four request types
-implement `Validatable`.
+implement `garde::Validate` (`folks::garde::Validate`, also in the prelude).
 
 ### Field Inclusion
 
@@ -354,11 +355,22 @@ Behaviour:
   For optional values (declared `Option<T>`, update and query fields, and
   clearable `Maybe<T>`), rules run only when a value is present.
 - Rules on the id apply to delete and query requests.
-- `validate()` reports every failure at once as `Error::Invalid(Vec<FieldError>)`,
-  where each `FieldError` has a `field` and a `message` and is serializable.
-- Request-level problems, such as an update request that sets nothing, use
-  `Error::ValidationError(String)`.
-- `is_empty()` is true when there are no required fields and every optional
+- The request types implement `garde::Validate<Context = ()>`. `validate()`
+  reports every failure at once in a `garde::Report`, so
+  `Garde<Json<UserCreateRequest>>` (axum-valid) and similar extractors work.
+- Failures are reported under the field's **serialized** name: serde `rename`
+  and `rename_all` (including a per-type `rename_all`) are applied, and
+  collection elements are `field[index]`.
+- `folks::Error` implements `From<garde::Report>`, so `request.validate()?`
+  works in a handler returning `folks::Error`. The result is
+  `Error::Invalid(Vec<FieldError>)` (each `FieldError` has a serializable
+  `field` and `message`).
+- Request-level problems, such as an update request that sets nothing, are
+  root-level garde errors (empty path). A report with only such entries
+  becomes `Error::ValidationError(String)`.
+- `custom(path)` keeps the signature `fn(&T) -> Result<(), E>`; you do not
+  have to use garde's `(&T, &Ctx)` signature.
+- The inherent `is_empty()` is true when there are no required fields and every optional
   field is unset. An empty update fails `validate()`; empty create and query
   requests are valid.
 
@@ -367,6 +379,19 @@ a rule on a type it cannot apply to (`length` on an integer, `range` on a
 string), unknown rules and arguments (with a suggestion), duplicate rules,
 `min` greater than `max`, `required` on a non-`Option` field, and `validate` on
 a field that appears in no request type.
+
+### Migrating from `Validatable`
+
+`Validatable` is gone; the generated request types implement
+`garde::Validate` instead.
+
+| Before | After |
+| ------ | ----- |
+| `use folks::Validatable;` | `use folks::garde::Validate;` (or `folks::prelude::*`) |
+| `req.validate() -> Result<(), folks::Error>` | `req.validate() -> Result<(), garde::Report>`; use `?` or `folks::Error::from(report)` |
+| `req.is_valid()` / `req.is_invalid()` | `req.validate().is_ok()` / `.is_err()` |
+| `req.is_empty()` | unchanged (now an inherent method) |
+| error `field` was the Rust field name | error `field` is the serialized name (`rename`, `rename_all`) |
 
 ### Serialization
 

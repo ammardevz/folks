@@ -21,6 +21,14 @@ impl FieldError {
     }
 }
 
+/// A report entry becomes a field error named by its path
+/// (`name`, `tags[1]`); request-level entries have an empty `field`.
+impl From<&(garde::Path, garde::Error)> for FieldError {
+    fn from((path, error): &(garde::Path, garde::Error)) -> Self {
+        Self::new(path.to_string(), error)
+    }
+}
+
 impl fmt::Display for FieldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}: {}", self.field, self.message)
@@ -45,6 +53,24 @@ pub enum Error {
     /// One or more field rules failed; all failures are reported together.
     #[error("validation error: {}", join(.0))]
     Invalid(Vec<FieldError>),
+}
+
+/// Converts a garde report, so `request.validate()?` works in handlers that
+/// return [`Error`].
+///
+/// A report holding only request-level entries (empty path, for example an
+/// update that sets nothing) becomes [`Error::ValidationError`]. Any other
+/// report becomes [`Error::Invalid`]; request-level entries in it keep an
+/// empty `field`.
+impl From<garde::Report> for Error {
+    fn from(report: garde::Report) -> Self {
+        let entries = report.into_inner();
+        if !entries.is_empty() && entries.iter().all(|(path, _)| path.is_empty()) {
+            let messages: Vec<&str> = entries.iter().map(|(_, e)| e.message()).collect();
+            return Error::ValidationError(messages.join("; "));
+        }
+        Error::Invalid(entries.iter().map(FieldError::from).collect())
+    }
 }
 
 impl Error {
