@@ -18,6 +18,14 @@
 //! `created_at`); `#[entity(immutable)]` = response + create + query (set
 //! once, never updated). Neither combines with a list, `skip` or the id.
 //!
+//! `#[entity(secret)]` marks a credential (password, token, API key). A bare
+//! `secret` means create + update only; listing `response` or `query` on a
+//! secret field, or combining it with `readonly`, `immutable`, `skip` or the
+//! id, is a compile error. Every generated type that contains a secret gets a
+//! hand-written `Debug` that prints `***` for it (types without secrets keep
+//! the derived `Debug`), so it cannot leak through `{:?}` logging. Secrets are
+//! still (de)serialized normally.
+//!
 //! `#[entity(skip)]` removes a field everywhere. A list such as
 //! `#[entity(response, create)]` includes the field in exactly those types.
 //! The id can never join create/update, is always in delete, and

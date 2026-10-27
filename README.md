@@ -269,11 +269,34 @@ Field attributes adjust the defaults:
 | `skip`                                            | Excluded from every generated type                    |
 | `readonly`                                        | Response and query only (for example `created_at`)    |
 | `immutable`                                       | Response, create and query; never updated             |
+| `secret`                                          | Create and update only; redacted (`***`) in `Debug`   |
 | `response`, `create`, `update`, `delete`, `query` | A list: the field appears in exactly the listed types |
 
 The id can never be placed in create or update requests, and it is always part
 of the delete request. Conflicting combinations, such as `skip` with a list, are
 reported as compile errors at the relevant attribute.
+
+#### Secrets
+
+Generated types derive `Debug`, which would print a password into your logs.
+Mark credentials with `#[entity(secret)]`:
+
+```rust,ignore
+#[entity(secret)]
+pub password: String,                 // create + update only
+#[entity(secret, create)]
+pub api_key: Option<String>,          // create only
+```
+
+Every generated type that contains a secret gets a hand-written `Debug` that
+prints `***` for it, so `{:?}` and `tracing` output never contain the value.
+Types without secrets keep the derived `Debug`. A secret is still serialized
+and deserialized normally. `secret` is a compile error on the id, on a field
+listed in `response` or `query`, and together with `readonly`, `immutable` or
+`skip`.
+
+Note: `Debug` of your own entity struct is yours; derive or implement it
+yourself with the same care.
 
 ### Optional Fields and Nullable Updates
 
@@ -385,13 +408,13 @@ a field that appears in no request type.
 `Validatable` is gone; the generated request types implement
 `garde::Validate` instead.
 
-| Before | After |
-| ------ | ----- |
-| `use folks::Validatable;` | `use folks::garde::Validate;` (or `folks::prelude::*`) |
+| Before                                       | After                                                                                  |
+| -------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `use folks::Validatable;`                    | `use folks::garde::Validate;` (or `folks::prelude::*`)                                 |
 | `req.validate() -> Result<(), folks::Error>` | `req.validate() -> Result<(), garde::Report>`; use `?` or `folks::Error::from(report)` |
-| `req.is_valid()` / `req.is_invalid()` | `req.validate().is_ok()` / `.is_err()` |
-| `req.is_empty()` | unchanged (now an inherent method) |
-| error `field` was the Rust field name | error `field` is the serialized name (`rename`, `rename_all`) |
+| `req.is_valid()` / `req.is_invalid()`        | `req.validate().is_ok()` / `.is_err()`                                                 |
+| `req.is_empty()`                             | unchanged (now an inherent method)                                                     |
+| error `field` was the Rust field name        | error `field` is the serialized name (`rename`, `rename_all`)                          |
 
 ### Serialization
 

@@ -114,6 +114,8 @@ pub struct Field<'a> {
     pub serde_always: Vec<Meta>,
     pub serde_typed: Vec<Meta>,
     pub serde_as: Option<Type>,
+    /// `#[entity(secret)]`: redacted in `Debug`, never in response or query.
+    pub secret: bool,
     /// Type-checked `validate(..)` rules (empty if none).
     pub rules: Vec<Rule>,
     /// `#[entity(default)]` (`Some(None)`) or `default = "path"` for create requests.
@@ -189,7 +191,7 @@ impl<'a> Entity<'a> {
         let mut fields = Vec::new();
         let mut id_spans = Vec::new();
         for f in &named.named {
-            match Field::parse(f, container.patch) {
+            match Field::parse(f, &input.ident, container.patch) {
                 Ok((field, id_span)) => {
                     if let Some(span) = id_span {
                         id_spans.push(span);
@@ -344,13 +346,13 @@ impl<'a> Entity<'a> {
 }
 
 impl<'a> Field<'a> {
-    fn parse(f: &'a syn::Field, patch: bool) -> Result<(Self, Option<Span>)> {
+    fn parse(f: &'a syn::Field, entity: &Ident, patch: bool) -> Result<(Self, Option<Span>)> {
         let ident = f
             .ident
             .as_ref()
             .ok_or_else(|| Error::new_spanned(f, "`Entity` requires named fields"))?;
         let attrs = attrs::parse_field(&f.attrs)?;
-        let targets = resolve_targets(&attrs, ident)?;
+        let targets = resolve_targets(&attrs, entity, ident)?;
         let serde = attrs::parse_field_serde(&f.attrs);
 
         if let Some((span, _)) = &attrs.default
@@ -427,6 +429,7 @@ impl<'a> Field<'a> {
             serde_always: serde.always,
             serde_typed: serde.typed,
             serde_as: attrs.serde_as,
+            secret: attrs.secret.is_some(),
             rules,
             default: attrs.default.map(|(_, path)| path),
             clearable,
@@ -444,8 +447,59 @@ impl<'a> Field<'a> {
 /// | `skip`   | none                            | conflicts with any list     |
 /// | `readonly`  | response, query              | shorthand, no list          |
 /// | `immutable` | response, create, query      | shorthand, no list          |
-fn resolve_targets(attrs: &FieldAttrs, field: &Ident) -> Result<TargetSet> {
+/// | `secret` | create, update                  | list without response/query |
+fn resolve_targets(attrs: &FieldAttrs, entity: &Ident, field: &Ident) -> Result<TargetSet> {
     let is_id = attrs.id.is_some();
+
+    if let Some(secret) = attrs.secret {
+        let at = format!("`{entity}::{field}`");
+        if is_id {
+            return Err(Error::new(
+                secret,
+                format!(
+                    "{at}: `secret` cannot be used on the `#[entity(id)]` field, which is always in responses and queries; remove `secret`"
+                ),
+            ));
+        }
+        if let Some(skip) = attrs.skip {
+            return Err(Error::new(
+                skip,
+                format!(
+                    "{at}: `secret` has no effect on a skipped field; remove `secret` or `skip`"
+                ),
+            ));
+        }
+        for (keyword, span) in [("readonly", attrs.readonly), ("immutable", attrs.immutable)] {
+            if let Some(span) = span {
+                return Err(Error::new(
+                    span,
+                    format!(
+                        "{at}: `{keyword}` puts the field in responses and queries, which a `secret` field must never be in; \
+                         remove `{keyword}` and use `#[entity(secret, create, update)]`"
+                    ),
+                ));
+            }
+        }
+        for (t, span) in &attrs.targets {
+            if matches!(t, Target::Response | Target::Query) {
+                return Err(Error::new(
+                    *span,
+                    format!(
+                        "{at}: a `secret` field cannot be in {} types, because secrets are never returned or used as query filters; \
+                         remove `{}` (for example `#[entity(secret, create, update)]`)",
+                        t.keyword(),
+                        t.keyword()
+                    ),
+                ));
+            }
+        }
+        if attrs.targets.is_empty() {
+            // A bare `secret` means: accepted on input, never returned.
+            return Ok(TargetSet::default()
+                .with(Target::Create)
+                .with(Target::Update));
+        }
+    }
 
     if let Some(skip) = attrs.skip {
         if is_id {

@@ -92,12 +92,17 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         .iter()
         .map(|f| field_def(f, target, krate, e.cfg.utoipa));
 
+    // Types holding a `secret` field get a hand-written, redacting `Debug`.
+    let has_secret = fields.iter().any(|f| f.secret);
     let mut derives = vec![
-        quote!(::core::fmt::Debug),
         quote!(::core::clone::Clone),
         quote!(#krate::serde::Serialize),
         quote!(#krate::serde::Deserialize),
     ];
+    if !has_secret {
+        derives.insert(0, quote!(::core::fmt::Debug));
+    }
+    let debug = has_secret.then(|| redacted_debug_impl(&name, &generics, &fields));
     if e.cfg.schemars {
         derives.push(quote!(#krate::schemars::JsonSchema));
     }
@@ -135,6 +140,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
             #(#field_defs)*
         }
 
+        #debug
         #validatable
         #extras
         #apply
@@ -145,6 +151,33 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         name,
         generics,
         tokens,
+    }
+}
+
+/// `Debug` that prints `***` for `secret` fields. Bounds match what
+/// `#[derive(Debug)]` would add: `Debug` on every type parameter.
+fn redacted_debug_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> TokenStream {
+    let mut generics = generics.clone();
+    for param in generics.type_params_mut() {
+        param.bounds.push(parse_quote!(::core::fmt::Debug));
+    }
+    let (impl_g, ty_g, where_c) = generics.split_for_impl();
+    let type_name = name.unraw().to_string();
+    let entries = fields.iter().map(|f| {
+        let i = f.ident;
+        let label = i.unraw().to_string();
+        if f.secret {
+            quote!(.field(#label, &::core::format_args!("***")))
+        } else {
+            quote!(.field(#label, &self.#i))
+        }
+    });
+    quote! {
+        impl #impl_g ::core::fmt::Debug for #name #ty_g #where_c {
+            fn fmt(&self, __f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
+                __f.debug_struct(#type_name) #(#entries)* .finish()
+            }
+        }
     }
 }
 

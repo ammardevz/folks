@@ -65,3 +65,14 @@ struct Hidden {
 pub fn touch() -> usize {
     std::mem::size_of::<Internal>() + std::mem::size_of::<Hidden>()
 }
+
+/// An entity with a secret field, to check the generated `Debug` is lint-clean.
+#[derive(Entity)]
+pub struct Login {
+    /// Primary key.
+    #[entity(id)]
+    pub id: u64,
+    /// Never printed.
+    #[entity(secret)]
+    pub password: String,
+}

@@ -20,7 +20,7 @@ pub fn push_error(acc: &mut Option<Error>, e: Error) {
     }
 }
 
-const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, response, create, update, delete, query, \
+const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, response, create, update, delete, query, \
      default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
 
 #[derive(Default)]
@@ -29,6 +29,7 @@ pub struct FieldAttrs {
     pub skip: Option<Span>,
     pub readonly: Option<Span>,
     pub immutable: Option<Span>,
+    pub secret: Option<Span>,
     pub targets: Vec<(Target, Span)>,
     pub default: Option<(Span, Option<LitStr>)>,
     pub clearable: Option<(Span, bool)>,
@@ -51,6 +52,8 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 set_once(&mut out.readonly, span, "readonly")
             } else if meta.path.is_ident("immutable") {
                 set_once(&mut out.immutable, span, "immutable")
+            } else if meta.path.is_ident("secret") {
+                set_once(&mut out.secret, span, "secret")
             } else if meta.path.is_ident("clearable") {
                 if out.clearable.is_some() {
                     return Err(Error::new(span, "duplicate `clearable` option"));
