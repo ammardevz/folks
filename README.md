@@ -365,9 +365,28 @@ cannot be combined with `serde_as`.
 | `with_x_nullable(Option<_>)`  | clearable update fields | `Some` sets; `None` clears                                     |
 | `Default`                     | update, query           | Nothing set; no bounds on generic parameters                   |
 | `From<User> for UserResponse` | entity                  | Moves the response fields out of the entity                    |
+| `From<Model> for UserResponse` | each `from(Model)`      | Converts same-named response fields with `Into::into`          |
 
-Each helper can be disabled with `#[entity(no(from, setters, patch, default, new))]`,
-for example to provide a hand-written `From` implementation.
+The entity conversion can be disabled with `#[entity(no(from))]`, for example
+to provide a hand-written `From` implementation. Explicit model conversions
+are independent of that helper:
+
+```rust
+#[derive(Entity)]
+#[entity(from(crate::database::UserModel), from(crate::legacy::User))]
+struct User {
+    #[entity(id)]
+    id: u64,
+    name: String,
+    nickname: Option<String>,
+}
+```
+
+Each `from(..)` generates `From<Source> for UserResponse`, mapping fields by
+their Rust names and converting each value with `Into::into`. Optional response
+fields map `Option<A>` to `Option<B>` with `Option::map`. A missing source
+field or a missing conversion is reported by rustc at the corresponding entity
+field. Multiple source types are supported.
 
 ### Patch, Diff and Filter
 

@@ -29,8 +29,42 @@ pub fn expand(e: &Entity) -> Result<TokenStream> {
         .helpers
         .from
         .then(|| from_impl(e, &generated[0], &krate));
+    let from_sources = source_from_impls(e, &generated[0]);
     let sort = sort_enum(e, &krate);
-    Ok(quote! { #sort #(#defs)* #entity_impl #from_impl })
+    Ok(quote! { #sort #(#defs)* #entity_impl #from_impl #(#from_sources)* })
+}
+
+/// Generate one `From<Source> for Response` per source type named with
+/// `#[entity(from(Source))]`.
+fn source_from_impls(e: &Entity, response: &Generated) -> Vec<TokenStream> {
+    e.cfg
+        .from_types
+        .iter()
+        .map(|source| {
+            let mut used = idents_in(source);
+            used.extend(idents_in(response.ty()));
+            let generics = subset(e.generics, &used);
+            let (impl_g, _, where_c) = generics.split_for_impl();
+            let response_ty = response.ty();
+            let fields = e.fields_for(Target::Response).into_iter().map(|field| {
+                let ident = &field.ident;
+                let ty = field.ty_in(Target::Response);
+                let convert = if option_inner(ty).is_some() {
+                    quote_spanned!(ident.span()=> __source.#ident.map(::core::convert::Into::into))
+                } else {
+                    quote_spanned!(ident.span()=> ::core::convert::Into::into(__source.#ident))
+                };
+                quote!(#ident: #convert)
+            });
+            quote! {
+                impl #impl_g ::core::convert::From<#source> for #response_ty #where_c {
+                    fn from(__source: #source) -> Self {
+                        Self { #(#fields),* }
+                    }
+                }
+            }
+        })
+        .collect()
 }
 
 fn sort_enum(e: &Entity, krate: &TokenStream) -> TokenStream {

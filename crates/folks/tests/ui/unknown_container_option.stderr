@@ -1,4 +1,4 @@
-error: unknown `entity` option on the struct; expected one of: name = "..", vis = "..", derive(..), serde(..), rename_all = "..", strict, patch, diff, matches, schemars, utoipa, no(..), and per-type blocks response(..) / create(..) / update(..) / delete(..) / query(..) (field options such as `id` or `skip` go on fields)
+error: unknown `entity` option on the struct; expected one of: name = "..", vis = "..", derive(..), serde(..), rename_all = "..", strict, patch, diff, matches, schemars, utoipa, no(..), and per-type blocks response(..) / create(..) / update(..) / delete(..) / query(..), from(Type) (field options such as `id` or `skip` go on fields)
  --> tests/ui/unknown_container_option.rs:4:10
   |
 4 | #[entity(skip)]

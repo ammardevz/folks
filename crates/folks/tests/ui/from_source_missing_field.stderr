@@ -1,0 +1,7 @@
+error[E0609]: no field `name` on type `Model`
+  --> tests/ui/from_source_missing_field.rs:12:5
+   |
+12 |     name: String,
+   |     ^^^^ unknown field
+   |
+   = note: available field is: `id`

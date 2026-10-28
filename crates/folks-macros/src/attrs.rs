@@ -242,6 +242,8 @@ pub struct ContainerAttrs {
     /// Indexed by `Target::index()`; overrides `shared`.
     pub per_type: [TypeConfig; 5],
     pub helpers: Helpers,
+    /// Source model types converted into the generated response type.
+    pub from_types: Vec<Type>,
     /// Merge-patch mode: every `Option<T>` field is clearable by default.
     pub patch: bool,
     /// Opt-in: `Diff` for the update request.
@@ -258,7 +260,7 @@ pub struct ContainerAttrs {
 
 const CONTAINER_OPTIONS: &str = "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", \
      strict, patch, diff, matches, schemars, utoipa, no(..), and per-type blocks \
-     response(..) / create(..) / update(..) / delete(..) / query(..)";
+     response(..) / create(..) / update(..) / delete(..) / query(..), from(Type)";
 const TYPE_OPTIONS: &str = "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", strict \
      (and `paginate` in `query(..)`)";
 
@@ -360,6 +362,17 @@ pub fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                         )))
                     }
                 })
+            } else if meta.path.is_ident("from") {
+                let content;
+                parenthesized!(content in meta.input);
+                let sources = Punctuated::<Type, Token![,]>::parse_terminated(&content)?;
+                if sources.is_empty() {
+                    return Err(meta.error(
+                        "`from(..)` needs at least one source type, e.g. `from(crate::Model)`",
+                    ));
+                }
+                out.from_types.extend(sources);
+                Ok(())
             } else if meta.path.is_ident("no") {
                 meta.parse_nested_meta(|m| {
                     if m.path.is_ident("from") {
