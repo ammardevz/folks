@@ -1,6 +1,6 @@
 # folks
 
-[![Rust](https://img.shields.io/badge/rust-1.99%2B-orange.svg)](https://www.rust-lang.org)
+[![Rust](https://img.shields.io/badge/rust-1.91.1%2B-orange.svg)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/)
 [![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green.svg)](#license)
 [![Workspace](https://img.shields.io/badge/cargo-workspace-lightgrey.svg)](https://doc.rust-lang.org/cargo/reference/workspaces.html)
@@ -35,6 +35,8 @@ and pagination included.
 - [License](#license)
 
 ## About
+
+The minimum supported Rust version is 1.91.1.
 
 Layered services usually need the same shape described several times: a stored
 entity, a response DTO, a create request, a partial-update request, a delete
@@ -134,7 +136,7 @@ differs.
 
 ### Prerequisites
 
-- Rust 1.99 or newer (the workspace uses edition 2024).
+- Rust 1.91.1 or newer (the workspace uses edition 2024).
 - Cargo, installed with the Rust toolchain.
 
 ### Using folks in a project
@@ -647,7 +649,7 @@ toolchain.
   the entity's own visibility.
 - With `Diff`, a flat `Option<T>` field that became `None` cannot be expressed
   unless the field is clearable.
-- The workspace targets Rust 1.99 and edition 2024. Other toolchains are not
+- The workspace targets Rust 1.91.1 and edition 2024. Other toolchains are not
   tested.
 
 ## Contributing
