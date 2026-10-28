@@ -1,3 +1,9 @@
+error: `Item::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/sortable_skip.rs:7:5
+  |
+7 |     name: String,
+  |     ^^^^
+
 error: `Item::name`: `sortable` has no effect on a skipped field; remove `sortable` or `skip`
  --> tests/ui/sortable_skip.rs:6:20
   |

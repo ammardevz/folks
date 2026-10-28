@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_float_bound_on_int.rs:8:5
+  |
+8 |     age: u8,
+  |     ^^^
+
 error: `u8` is an integer type; use an integer bound, not a float
  --> tests/ui/validate_float_bound_on_int.rs:7:35
   |

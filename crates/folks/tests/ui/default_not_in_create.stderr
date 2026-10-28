@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/default_not_in_create.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `default` fills omitted fields of create requests, but this field is not in them
  --> tests/ui/default_not_in_create.rs:7:22
   |

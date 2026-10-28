@@ -1,3 +1,9 @@
+error: `Item::score`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/query_contains_non_text.rs:7:5
+  |
+7 |     score: u32,
+  |     ^^^^^
+
 error: `Item::score`: `query(contains)` needs text (String or &str), not `u32`; use `query(range)` or `query(eq)` instead
  --> tests/ui/query_contains_non_text.rs:6:20
   |

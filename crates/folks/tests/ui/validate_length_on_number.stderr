@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_length_on_number.rs:8:5
+  |
+8 |     age: u32,
+  |     ^^^
+
 error: `length` cannot be applied to `u32`: it needs text or a collection (String, &str, Vec<_>, ...)
  --> tests/ui/validate_length_on_number.rs:7:23
   |

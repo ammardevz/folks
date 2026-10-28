@@ -1,3 +1,9 @@
+error: `Item::created`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/query_duplicate_mode.rs:7:5
+  |
+7 |     created: i64,
+  |     ^^^^^^^
+
 error: duplicate `range` option
  --> tests/ui/query_duplicate_mode.rs:6:27
   |

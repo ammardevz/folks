@@ -1,3 +1,9 @@
+error: `User`: this struct's `entity` configuration is invalid; correct or remove the option shown below
+ --> tests/ui/no_unknown_helper.rs:5:8
+  |
+5 | struct User {
+  |        ^^^^
+
 error: expected one of: from, setters, patch, default, new
  --> tests/ui/no_unknown_helper.rs:4:13
   |

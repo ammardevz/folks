@@ -1,3 +1,9 @@
+error: `User::id`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/id_in_update.rs:6:5
+  |
+6 |     id: u32,
+  |     ^^
+
 error: the id field cannot be included in the update request
  --> tests/ui/id_in_update.rs:5:18
   |

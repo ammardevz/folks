@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_each_on_non_collection.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `each` cannot be applied to `String`: it needs a collection (Vec, VecDeque, HashSet, BTreeSet, slice or array)
  --> tests/ui/validate_each_on_non_collection.rs:7:23
   |

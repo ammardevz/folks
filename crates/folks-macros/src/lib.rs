@@ -1,4 +1,5 @@
-//! `#[derive(Entity)]` for the `folks` crate. Use it through `folks::Entity`;
+//! `#[derive(Entity)]` / `#[derive(Dto)]` for the `folks` crate. Use them through
+//! `folks::Entity` / `folks::Dto`;
 //! the user-facing documentation lives on that re-export.
 //!
 //! For `struct User` it generates `UserResponse`, `UserCreateRequest`,
@@ -137,6 +138,8 @@
 //!
 //! * `From<User> for UserResponse` (moves the fields out; not available for
 //!   entities that implement `Drop`).
+//! * `#[entity(from(crate::Model))]`: `From<crate::Model> for UserResponse`,
+//!   converting same-named fields with `Into::into`.
 //! * `UserCreateRequest::new(required..)`: required fields as `impl Into<T>`,
 //!   optional ones start unset.
 //! * Fluent setters on create, update and query types (`impl Into<T>` for the
@@ -229,6 +232,17 @@ use syn::{DeriveInput, parse_macro_input};
 
 #[proc_macro_derive(Entity, attributes(entity, serde))]
 pub fn derive_entity(input: TokenStream) -> TokenStream {
+    expand_derive(input)
+}
+
+/// Alias for [`Entity`](macro@Entity), with the same `entity` and `serde`
+/// helper attributes.
+#[proc_macro_derive(Dto, attributes(entity, serde))]
+pub fn derive_dto(input: TokenStream) -> TokenStream {
+    expand_derive(input)
+}
+
+fn expand_derive(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     model::Entity::parse(&input)
         .and_then(|entity| codegen::expand(&entity))

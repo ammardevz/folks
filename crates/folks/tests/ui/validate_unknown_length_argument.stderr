@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_unknown_length_argument.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: unknown `length` argument `minimum`; expected `min`, `max`, `equal` or a mode (`simple`, `bytes`, `chars`, `utf16`)
  --> tests/ui/validate_unknown_length_argument.rs:7:30
   |

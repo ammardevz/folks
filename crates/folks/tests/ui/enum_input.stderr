@@ -1,4 +1,4 @@
-error: `Entity` can only be derived for structs with named fields
+error: `User`: `Entity` / `Dto` can only be derived for structs with named fields; convert the input to a named-field struct
  --> tests/ui/enum_input.rs:4:6
   |
 4 | enum User {

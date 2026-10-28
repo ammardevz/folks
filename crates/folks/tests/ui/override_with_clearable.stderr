@@ -1,3 +1,9 @@
+error: `User::bio`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/override_with_clearable.rs:8:5
+  |
+8 |     bio: Option<String>,
+  |     ^^^
+
 error: `User::bio`: `clearable` cannot be combined with `update(ty = ..)`; remove one of them
  --> tests/ui/override_with_clearable.rs:7:26
   |

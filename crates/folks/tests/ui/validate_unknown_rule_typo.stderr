@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_unknown_rule_typo.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: unknown validation rule `lenght`; did you mean `length`? (rules: length, range, ascii, alphanumeric, email, url, contains, prefix, suffix, pattern, required, custom, each)
  --> tests/ui/validate_unknown_rule_typo.rs:7:23
   |

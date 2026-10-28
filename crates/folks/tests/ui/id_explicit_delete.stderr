@@ -1,3 +1,9 @@
+error: `User::id`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/id_explicit_delete.rs:6:5
+  |
+6 |     id: u32,
+  |     ^^
+
 error: the id field is always part of the delete request; remove `delete`
  --> tests/ui/id_explicit_delete.rs:5:18
   |

@@ -2,6 +2,7 @@
 
 use proc_macro2::Span;
 use syn::ext::IdentExt;
+use syn::spanned::Spanned;
 use syn::{
     Attribute, Data, DeriveInput, Error, Fields, Generics, Ident, LitStr, Meta, Path, Result, Type,
     Visibility, parse_quote,
@@ -234,17 +235,33 @@ impl<'a> Entity<'a> {
         let Data::Struct(data) = &input.data else {
             return Err(Error::new_spanned(
                 &input.ident,
-                "`Entity` can only be derived for structs with named fields",
+                format!(
+                    "`{}`: `Entity` / `Dto` can only be derived for structs with named fields; convert the input to a named-field struct",
+                    input.ident
+                ),
             ));
         };
         let Fields::Named(named) = &data.fields else {
             return Err(Error::new_spanned(
                 &input.ident,
-                "`Entity` can only be derived for structs with named fields",
+                format!(
+                    "`{}`: `Entity` / `Dto` can only be derived for structs with named fields; use named fields",
+                    input.ident
+                ),
             ));
         };
 
-        let container = attrs::parse_container(&input.attrs)?;
+        let container = attrs::parse_container(&input.attrs).map_err(|error| {
+            let mut context = Error::new(
+                input.ident.span(),
+                format!(
+                    "`{}`: this struct's `entity` configuration is invalid; correct or remove the option shown below",
+                    input.ident
+                ),
+            );
+            context.combine(error);
+            context
+        })?;
         let base = container
             .prefix
             .as_ref()
@@ -263,7 +280,20 @@ impl<'a> Entity<'a> {
                     }
                     fields.push(field);
                 }
-                Err(e) => push_error(&mut errors, e),
+                Err(e) => {
+                    let mut context = Error::new(
+                        f.ident.as_ref().map_or_else(|| f.span(), Ident::span),
+                        format!(
+                            "`{}::{}`: this field's configuration is invalid; correct or remove the option shown below",
+                            input.ident,
+                            f.ident
+                                .as_ref()
+                                .map_or_else(|| "<unnamed>".to_owned(), ToString::to_string)
+                        ),
+                    );
+                    context.combine(e);
+                    push_error(&mut errors, context);
+                }
             }
         }
 
@@ -275,7 +305,10 @@ impl<'a> Entity<'a> {
                 &mut errors,
                 Error::new_spanned(
                     &input.ident,
-                    "`Entity` requires exactly one field marked `#[entity(id)]`",
+                    format!(
+                        "`{}` requires exactly one id field; mark one named field with `#[entity(id)]`",
+                        input.ident
+                    ),
                 ),
             ),
             [_] => {}
@@ -283,12 +316,21 @@ impl<'a> Entity<'a> {
                 for span in rest {
                     push_error(
                         &mut errors,
-                        Error::new(*span, "only one field may be marked `#[entity(id)]`"),
+                        Error::new(
+                            *span,
+                            format!(
+                                "`{}`: only one field may be marked `#[entity(id)]`; remove this marker",
+                                input.ident
+                            ),
+                        ),
                     );
                 }
                 push_error(
                     &mut errors,
-                    Error::new(*first, "first `#[entity(id)]` field is here"),
+                    Error::new(
+                        *first,
+                        format!("`{}`: the first `#[entity(id)]` field is here", input.ident),
+                    ),
                 );
             }
         }
@@ -449,7 +491,8 @@ impl<'a> Entity<'a> {
                 return Err(Error::new(
                     self.ident.span(),
                     format!(
-                        "the sort enum and the {} type would both be named `{sort}`; give the {} type a different name, e.g. `{}(name = \"..\")`",
+                        "`{}`: the sort enum and the {} type would both be named `{sort}`; give the {} type a different name, e.g. `{}(name = \"..\")`",
+                        self.ident,
                         t.keyword(),
                         t.keyword(),
                         t.keyword()
@@ -463,8 +506,9 @@ impl<'a> Entity<'a> {
                 return Err(Error::new(
                     self.type_name(t).span(),
                     format!(
-                        "the {} and {} types would both be named `{name}`; \
+                        "`{}`: the {} and {} types would both be named `{name}`; \
                          give one a different name, e.g. `response(name = \"..\")`",
+                        self.ident,
                         other.keyword(),
                         t.keyword()
                     ),

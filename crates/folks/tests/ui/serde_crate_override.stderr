@@ -1,3 +1,9 @@
+error: `User`: this struct's `entity` configuration is invalid; correct or remove the option shown below
+ --> tests/ui/serde_crate_override.rs:5:8
+  |
+5 | struct User {
+  |        ^^^^
+
 error: `crate` is set by folks and cannot be overridden
  --> tests/ui/serde_crate_override.rs:4:16
   |

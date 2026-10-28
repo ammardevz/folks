@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_in_response_only_field.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `validate(..)` has no effect: this field is in no request type (create, update, delete, query), and responses are not validated
  --> tests/ui/validate_in_response_only_field.rs:7:24
   |

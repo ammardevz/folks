@@ -5,6 +5,7 @@ use thiserror::Error;
 /// One failed validation rule on one field.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 #[derive(serde::Serialize, serde::Deserialize)]
 pub struct FieldError {
     /// Field name; elements of a collection are `name[index]`.
@@ -56,7 +57,7 @@ pub enum Error {
 }
 
 /// Converts a garde report, so `request.validate()?` works in handlers that
-/// return [`Error`].
+/// return [`enum@Error`].
 ///
 /// A report holding only request-level entries (empty path, for example an
 /// update that sets nothing) becomes [`Error::ValidationError`]. Any other

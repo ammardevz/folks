@@ -52,6 +52,8 @@ impl PageRequest {
 
 /// One page of results plus the total number of matches.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
 pub struct Page<T> {
     pub items: Vec<T>,
     pub total: u64,

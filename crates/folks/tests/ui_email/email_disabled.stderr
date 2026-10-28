@@ -1,3 +1,9 @@
+error: `User::mail`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui_email/email_disabled.rs:9:5
+  |
+9 |     mail: String,
+  |     ^^^^
+
 error: the `email` rule needs the `email` feature of the `folks` crate (features = ["email"])
  --> tests/ui_email/email_disabled.rs:8:23
   |

@@ -1,4 +1,4 @@
-error: `Entity` can only be derived for structs with named fields
+error: `User`: `Entity` / `Dto` can only be derived for structs with named fields; use named fields
  --> tests/ui/tuple_struct.rs:4:8
   |
 4 | struct User(u32);

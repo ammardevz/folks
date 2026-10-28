@@ -1,4 +1,4 @@
-error: the response and create types would both be named `UserCreateRequest`; give one a different name, e.g. `response(name = "..")`
+error: `User`: the response and create types would both be named `UserCreateRequest`; give one a different name, e.g. `response(name = "..")`
  --> tests/ui/names_collide.rs:5:8
   |
 5 | struct User {

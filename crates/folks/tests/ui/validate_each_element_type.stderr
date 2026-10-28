@@ -1,3 +1,9 @@
+error: `User::tags`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_each_element_type.rs:8:5
+  |
+8 |     tags: Vec<u8>,
+  |     ^^^^
+
 error: `length` cannot be applied to `u8`: it needs text or a collection (String, &str, Vec<_>, ...)
  --> tests/ui/validate_each_element_type.rs:7:28
   |

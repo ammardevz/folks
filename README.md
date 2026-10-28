@@ -41,9 +41,11 @@ entity, a response DTO, a create request, a partial-update request, a delete
 request and a query filter. Keeping those in sync by hand is repetitive and
 error prone.
 
-`folks` provides a single derive macro, `#[derive(Entity)]`. From one struct
-with one field marked `#[entity(id)]`, it generates all five types and
-implements `folks::core::entity::Entity` for the struct. The generated types
+`folks` provides `#[derive(Entity)]` and its alias `#[derive(Dto)]`. Both use
+the same `#[entity(..)]` options. `Dto` is useful when a local ORM already uses
+`Entity` as a type name. From one struct with one field marked `#[entity(id)]`,
+either derive generates all five types and implements
+`folks::core::entity::Entity` for the struct. The generated types
 derive `Debug`, `Clone`, `Serialize` and `Deserialize`, and the request types
 implement `garde::Validate`, so they work with `axum-valid`, `actix-web-garde`
 and every other garde integration.

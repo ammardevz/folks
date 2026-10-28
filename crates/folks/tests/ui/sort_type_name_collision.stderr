@@ -1,4 +1,4 @@
-error: the sort enum and the response type would both be named `ItemSortField`; give the response type a different name, e.g. `response(name = "..")`
+error: `Item`: the sort enum and the response type would both be named `ItemSortField`; give the response type a different name, e.g. `response(name = "..")`
  --> tests/ui/sort_type_name_collision.rs:4:8
   |
 4 | struct Item {

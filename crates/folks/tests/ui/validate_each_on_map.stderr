@@ -1,3 +1,9 @@
+error: `User::tags`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_each_on_map.rs:8:5
+  |
+8 |     tags: std::collections::HashMap<String, String>,
+  |     ^^^^
+
 error: `each(..)` does not support `std::collections::HashMap<String, String>`; use Vec, VecDeque, HashSet, BTreeSet, a slice or an array
  --> tests/ui/validate_each_on_map.rs:7:23
   |

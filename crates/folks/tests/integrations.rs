@@ -25,6 +25,16 @@ mod schemars_tests {
         assert!(json["properties"].get("id").is_none());
         let sort = folks::schemars::schema_for!(BookSortField);
         assert!(serde_json::to_value(sort).unwrap().is_object());
+        assert!(
+            serde_json::to_value(folks::schemars::schema_for!(folks::FieldError))
+                .unwrap()
+                .is_object()
+        );
+        assert!(
+            serde_json::to_value(folks::schemars::schema_for!(folks::Page<u32>))
+                .unwrap()
+                .is_object()
+        );
 
         // Even the merge-patch update type (`Option<Option<T>>`) has a schema.
         let update = serde_json::to_value(folks::schemars::schema_for!(BookUpdateRequest)).unwrap();
@@ -55,5 +65,8 @@ mod utoipa_tests {
         // The clearable update field (`Maybe<String>`) is described as nullable.
         assert_eq!(MovieUpdateRequest::name(), "MovieUpdateRequest");
         assert_eq!(MovieSortField::name(), "MovieSortField");
+        fn assert_to_schema<T: ToSchema>() {}
+        assert_to_schema::<folks::FieldError>();
+        assert_to_schema::<folks::Page<u32>>();
     }
 }

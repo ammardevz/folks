@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/bad_serde_as.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `serde_as` must be a type, e.g. `serde_as = "DisplayFromStr"`: unexpected token
  --> tests/ui/bad_serde_as.rs:7:25
   |

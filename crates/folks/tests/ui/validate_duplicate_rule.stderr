@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_duplicate_rule.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: duplicate `length` rule
  --> tests/ui/validate_duplicate_rule.rs:7:40
   |

@@ -1,3 +1,9 @@
+error: `User::id`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/skip_on_id.rs:6:5
+  |
+6 |     id: u32,
+  |     ^^
+
 error: the `#[entity(id)]` field cannot be skipped
  --> tests/ui/skip_on_id.rs:5:18
   |

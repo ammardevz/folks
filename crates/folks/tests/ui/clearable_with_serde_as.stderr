@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/clearable_with_serde_as.rs:8:5
+  |
+8 |     age: Option<u32>,
+  |     ^^^
+
 error: `clearable` cannot be combined with `serde_as`
  --> tests/ui/clearable_with_serde_as.rs:7:14
   |

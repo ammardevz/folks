@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_min_above_max.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `max` (1) is lower than `min` (5)
  --> tests/ui/validate_min_above_max.rs:7:45
   |

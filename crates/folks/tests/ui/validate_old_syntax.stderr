@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_old_syntax.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `validate` takes rules, e.g. `validate(length(min = 1))`; for a custom function use `validate(custom(path::to::fn))`
  --> tests/ui/validate_old_syntax.rs:7:14
   |

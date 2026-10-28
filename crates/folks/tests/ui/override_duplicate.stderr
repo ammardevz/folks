@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/override_duplicate.rs:8:5
+  |
+8 |     age: u32,
+  |     ^^^
+
 error: duplicate `ty` option
  --> tests/ui/override_duplicate.rs:7:30
   |

@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/skip_with_readonly.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `readonly`/`immutable` conflict with `skip`
  --> tests/ui/skip_with_readonly.rs:7:20
   |

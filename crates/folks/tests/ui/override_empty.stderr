@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/override_empty.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `create()` is empty; write `create` or `create(ty = Type, rename = "..")`
  --> tests/ui/override_empty.rs:7:14
   |

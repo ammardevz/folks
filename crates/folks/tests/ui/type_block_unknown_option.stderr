@@ -1,3 +1,9 @@
+error: `User`: this struct's `entity` configuration is invalid; correct or remove the option shown below
+ --> tests/ui/type_block_unknown_option.rs:5:8
+  |
+5 | struct User {
+  |        ^^^^
+
 error: unknown option for `response(..)`; expected one of: name = "..", vis = "..", derive(..), serde(..), rename_all = "..", strict (and `paginate` in `query(..)`)
  --> tests/ui/type_block_unknown_option.rs:4:19
   |

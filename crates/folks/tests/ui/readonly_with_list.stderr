@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/readonly_with_list.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `update` conflicts with `readonly` on field `name`
  --> tests/ui/readonly_with_list.rs:7:24
   |

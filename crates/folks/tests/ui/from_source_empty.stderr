@@ -1,3 +1,9 @@
+error: `User`: this struct's `entity` configuration is invalid; correct or remove the option shown below
+ --> tests/ui/from_source_empty.rs:4:8
+  |
+4 | struct User {
+  |        ^^^^
+
 error: `from(..)` needs at least one source type, e.g. `from(crate::Model)`
  --> tests/ui/from_source_empty.rs:3:10
   |

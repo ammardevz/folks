@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/clearable_not_in_update.rs:8:5
+  |
+8 |     name: Option<String>,
+  |     ^^^^
+
 error: `clearable` needs the field in update requests (it is skipped or excluded)
  --> tests/ui/clearable_not_in_update.rs:7:14
   |

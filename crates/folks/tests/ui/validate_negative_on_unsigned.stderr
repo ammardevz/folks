@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_negative_on_unsigned.rs:8:5
+  |
+8 |     age: u8,
+  |     ^^^
+
 error: `u8` is unsigned; a negative bound can never apply
  --> tests/ui/validate_negative_on_unsigned.rs:7:36
   |

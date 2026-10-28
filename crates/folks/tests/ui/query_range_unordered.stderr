@@ -1,3 +1,9 @@
+error: `Item::active`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/query_range_unordered.rs:7:5
+  |
+7 |     active: bool,
+  |     ^^^^^^
+
 error: `Item::active`: `query(range)` needs an ordered type such as a number, string or date, not `bool`; use `query(eq)` or remove `range`
  --> tests/ui/query_range_unordered.rs:6:20
   |

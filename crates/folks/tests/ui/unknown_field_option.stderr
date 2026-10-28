@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/unknown_field_option.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: unknown `entity` field option; expected one of: id, skip, readonly, immutable, secret, sortable, response, create, update, delete, query (each also as `create(ty = Type, rename = "..")`; `query(eq, range, contains)`), default, default = "..", clearable, clearable = false, serde_as = "..", validate(..)
  --> tests/ui/unknown_field_option.rs:7:14
   |

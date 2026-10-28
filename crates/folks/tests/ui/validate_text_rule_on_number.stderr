@@ -1,3 +1,9 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_text_rule_on_number.rs:8:5
+  |
+8 |     age: u8,
+  |     ^^^
+
 error: `ascii` cannot be applied to `u8`: it needs text (String or &str)
  --> tests/ui/validate_text_rule_on_number.rs:7:23
   |

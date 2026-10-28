@@ -1,3 +1,9 @@
+error: `User`: this struct's `entity` configuration is invalid; correct or remove the option shown below
+ --> tests/ui/vis_invalid.rs:5:8
+  |
+5 | struct User {
+  |        ^^^^
+
 error: `vis` must be a visibility such as "pub(crate)": unexpected token
  --> tests/ui/vis_invalid.rs:4:16
   |

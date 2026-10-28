@@ -49,7 +49,7 @@ pub use self::core::maybe::Maybe;
 pub use self::core::page::{Page, PageRequest};
 pub use self::core::patch::{Diff, Patch};
 pub use self::core::sort::SortOrder;
-pub use folks_macros::Entity;
+pub use folks_macros::{Dto, Entity};
 
 // Re-exported so generated code (and `#[entity(serde_as = "...")]` types) need
 // no direct `serde` / `serde_with` dependency in the consumer crate.
@@ -70,5 +70,5 @@ pub use utoipa;
 /// `.validate()`), `Patch`, `Page`.
 pub mod prelude {
     pub use crate::garde::Validate;
-    pub use crate::{Diff, Entity, Filter, Maybe, Page, PageRequest, Patch, SortOrder};
+    pub use crate::{Diff, Dto, Entity, Filter, Maybe, Page, PageRequest, Patch, SortOrder};
 }

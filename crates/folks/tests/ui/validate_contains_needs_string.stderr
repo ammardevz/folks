@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_contains_needs_string.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: expected string literal
  --> tests/ui/validate_contains_needs_string.rs:7:32
   |

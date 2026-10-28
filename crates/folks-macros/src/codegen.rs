@@ -16,7 +16,7 @@ use crate::rules::{self, Kind};
 use crate::types::{idents_in, option_inner};
 
 pub fn expand(e: &Entity) -> Result<TokenStream> {
-    let krate = resolve_crate()?;
+    let krate = resolve_crate(e.ident)?;
     let generated: Vec<Generated> = Target::ALL
         .iter()
         .map(|&t| generate(e, t, &krate))
@@ -57,6 +57,7 @@ fn source_from_impls(e: &Entity, response: &Generated) -> Vec<TokenStream> {
                 quote!(#ident: #convert)
             });
             quote! {
+                #[automatically_derived]
                 impl #impl_g ::core::convert::From<#source> for #response_ty #where_c {
                     fn from(__source: #source) -> Self {
                         Self { #(#fields),* }
@@ -123,7 +124,7 @@ fn sort_variant(ident: &Ident) -> Ident {
 }
 
 /// Path to the runtime crate, honouring `package = "folks"` renames.
-fn resolve_crate() -> Result<TokenStream> {
+fn resolve_crate(entity: &Ident) -> Result<TokenStream> {
     match crate_name("folks") {
         // Integration tests / examples of `folks` itself also take this path;
         // `extern crate self as folks;` makes `::folks` valid in-crate too.
@@ -135,7 +136,7 @@ fn resolve_crate() -> Result<TokenStream> {
         Err(err) => Err(Error::new(
             Span::call_site(),
             format!(
-                "`#[derive(Entity)]` could not locate the `folks` crate; add it as a dependency ({err})"
+                "`{entity}`: `#[derive(Entity)]` / `#[derive(Dto)]` could not locate the `folks` crate; add `folks` as a dependency ({err})"
             ),
         )),
     }
@@ -178,7 +179,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         uses_serde_as.then(|| quote!(#[#krate::serde_with::serde_as(crate = #serde_with_path)]));
     let container_serde = e.serde_attrs(target);
     let doc = format!(
-        "{} type generated for `{}` by `#[derive(Entity)]`.",
+        "{} type generated from [`{}`].",
         target.suffix(),
         e.ident.unraw()
     );
@@ -229,6 +230,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
     };
     let page_request = (target == Target::Query && e.cfg.paginate).then(|| {
         quote! {
+            #[automatically_derived]
             impl #impl_g #name #ty_g #where_c {
                 /// Converts these query parameters to a clamped page request.
                 #[must_use]
@@ -294,6 +296,7 @@ fn redacted_debug_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> 
         }
     });
     quote! {
+        #[automatically_derived]
         impl #impl_g ::core::fmt::Debug for #name #ty_g #where_c {
             fn fmt(&self, __f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
                 __f.debug_struct(#type_name) #(#entries)* .finish()
@@ -468,6 +471,7 @@ fn validatable_impl(
 
     quote! {
         #[allow(dead_code)]
+        #[automatically_derived]
         impl #impl_g #name #ty_g #where_c {
             #[doc = #empty_doc]
             #[must_use]
@@ -476,6 +480,7 @@ fn validatable_impl(
             }
         }
 
+        #[automatically_derived]
         impl #impl_g #garde::Validate for #name #ty_g #where_c {
             type Context = ();
 
@@ -576,6 +581,7 @@ fn builder_impls(
             }
         }
         quote! {
+            #[automatically_derived]
             impl #impl_g ::core::default::Default for #name #ty_g #where_c {
                 fn default() -> Self {
                     Self { #(#defaults),* }
@@ -620,6 +626,7 @@ fn builder_impls(
         let setters = setters.iter().flatten();
         quote! {
             #[allow(dead_code)]
+            #[automatically_derived]
             impl #impl_g #name #ty_g #where_c {
                 #new_fn
                 #(#setters)*
@@ -750,6 +757,7 @@ fn patch_impl(
     };
 
     quote! {
+        #[automatically_derived]
         impl #impl_g #krate::core::patch::Patch<#entity #entity_ty_g> for #name #sub_ty_g #entity_where {
             fn apply_to(self, __target: &mut #entity #entity_ty_g) {
                 #body
@@ -817,6 +825,7 @@ fn diff_impl(
     });
 
     quote! {
+        #[automatically_derived]
         impl #impl_g #krate::core::patch::Diff<#entity #entity_ty_g> for #name #sub_ty_g #entity_where {
             fn diff(__old: &#entity #entity_ty_g, __new: &#entity #entity_ty_g) -> Self {
                 Self { #(#inits),* }
@@ -906,6 +915,7 @@ fn matches_impl(
     };
 
     quote! {
+        #[automatically_derived]
         impl #impl_g #krate::core::filter::Filter<#entity #entity_ty_g> for #name #sub_ty_g #entity_where {
             fn matches(&self, __entity: &#entity #entity_ty_g) -> bool {
                 #body
@@ -959,6 +969,7 @@ fn from_impl(e: &Entity, response: &Generated, krate: &TokenStream) -> TokenStre
         quote!(#i: #value)
     });
     quote! {
+        #[automatically_derived]
         impl #impl_g ::core::convert::From<#entity #ty_g> for #response_ty #where_c {
             fn from(__entity: #entity #ty_g) -> Self {
                 Self { #(#moves),* }
@@ -1001,6 +1012,7 @@ fn entity_impl(e: &Entity, generated: &[Generated], krate: &TokenStream) -> Toke
     let (impl_g, ty_g, where_c) = generics.split_for_impl();
 
     quote! {
+        #[automatically_derived]
         impl #impl_g #krate::core::entity::Entity for #name #ty_g #where_c {
             type EntityId = #id_ty;
             type EntityResponse = #response;

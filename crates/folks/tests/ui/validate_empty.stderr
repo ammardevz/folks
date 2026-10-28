@@ -1,3 +1,9 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_empty.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
 error: `validate()` needs at least one rule
  --> tests/ui/validate_empty.rs:7:14
   |
