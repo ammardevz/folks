@@ -2,7 +2,7 @@
 
 [![Rust](https://img.shields.io/badge/rust-1.91.1%2B-orange.svg)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/)
-[![License](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-green.svg)](#license)
+[![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
 [![Workspace](https://img.shields.io/badge/cargo-workspace-lightgrey.svg)](https://doc.rust-lang.org/cargo/reference/workspaces.html)
 
 A Rust library that turns one entity definition into a complete, consistent set
