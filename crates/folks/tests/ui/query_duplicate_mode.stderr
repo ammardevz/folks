@@ -1,0 +1,5 @@
+error: duplicate `range` option
+ --> tests/ui/query_duplicate_mode.rs:6:27
+  |
+6 |     #[entity(query(range, range))]
+  |                           ^^^^^

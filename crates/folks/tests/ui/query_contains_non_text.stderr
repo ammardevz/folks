@@ -1,0 +1,5 @@
+error: `Item::score`: `query(contains)` needs text (String or &str), not `u32`; use `query(range)` or `query(eq)` instead
+ --> tests/ui/query_contains_non_text.rs:6:20
+  |
+6 |     #[entity(query(contains))]
+  |                    ^^^^^^^^

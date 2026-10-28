@@ -10,7 +10,7 @@ use syn::ext::IdentExt;
 use syn::{Error, Generics, Ident, LitStr, Result, parse_quote};
 
 use crate::generics::{param_names, subset};
-use crate::model::{Entity, Field, Target};
+use crate::model::{Entity, Field, QueryKind, Target};
 use crate::names;
 use crate::rules::{self, Kind};
 use crate::types::{idents_in, option_inner};
@@ -29,7 +29,63 @@ pub fn expand(e: &Entity) -> Result<TokenStream> {
         .helpers
         .from
         .then(|| from_impl(e, &generated[0], &krate));
-    Ok(quote! { #(#defs)* #entity_impl #from_impl })
+    let sort = sort_enum(e, &krate);
+    Ok(quote! { #sort #(#defs)* #entity_impl #from_impl })
+}
+
+fn sort_enum(e: &Entity, krate: &TokenStream) -> TokenStream {
+    let fields = e.sortable();
+    if fields.is_empty() {
+        return quote!();
+    }
+    let name = e.sort_name();
+    let vis = e.vis(Target::Query);
+    let variants = fields.iter().map(|f| {
+        let variant = sort_variant(&f.ident);
+        let wire = LitStr::new(&wire_name(e, f, Target::Query), f.ident.span());
+        quote!(#[doc = #wire] #[serde(rename = #wire)] #variant)
+    });
+    let serde_path = LitStr::new(&quote!(#krate::serde).to_string(), Span::call_site());
+    let mut derives = vec![
+        quote!(::core::fmt::Debug),
+        quote!(::core::marker::Copy),
+        quote!(::core::clone::Clone),
+        quote!(::core::cmp::PartialEq),
+        quote!(::core::cmp::Eq),
+        quote!(#krate::serde::Serialize),
+        quote!(#krate::serde::Deserialize),
+    ];
+    if e.cfg.schemars {
+        derives.push(quote!(#krate::schemars::JsonSchema));
+    }
+    if e.cfg.utoipa {
+        derives.push(quote!(::utoipa::ToSchema));
+    }
+    let schemars_attr = e.cfg.schemars.then(|| {
+        let path = LitStr::new(&quote!(#krate::schemars).to_string(), Span::call_site());
+        quote!(#[schemars(crate = #path)])
+    });
+    quote! {
+        #[doc = "Sort fields accepted by the generated query request."]
+        #[derive(#(#derives),*)]
+        #schemars_attr
+        #[serde(crate = #serde_path)]
+        #vis enum #name { #(#variants),* }
+    }
+}
+
+fn sort_variant(ident: &Ident) -> Ident {
+    let mut upper = true;
+    let mut name = String::new();
+    for ch in ident.unraw().to_string().chars() {
+        if ch == '_' {
+            upper = true;
+            continue;
+        }
+        name.push(if upper { ch.to_ascii_uppercase() } else { ch });
+        upper = false;
+    }
+    Ident::new(&name, ident.span())
 }
 
 /// Path to the runtime crate, honouring `package = "folks"` renames.
@@ -78,7 +134,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         }
     }
     let generics = subset(e.generics, &used);
-    let (impl_g, _, where_c) = generics.split_for_impl();
+    let (impl_g, ty_g, where_c) = generics.split_for_impl();
 
     let vis = e.vis(target);
     let serde_path = LitStr::new(&quote!(#krate::serde).to_string(), Span::call_site());
@@ -92,9 +148,21 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         target.suffix(),
         e.ident.unraw()
     );
-    let field_defs = fields
+    let mut field_defs: Vec<TokenStream> = fields
         .iter()
-        .map(|f| field_def(f, target, krate, e.cfg.utoipa));
+        .map(|f| field_def(f, target, krate, e.cfg.utoipa))
+        .collect();
+    if target == Target::Query {
+        if !e.sortable().is_empty() {
+            let sort_ty = e.sort_name();
+            field_defs.push(quote!(#[doc = "Sort field."] #[serde(default, skip_serializing_if = "Option::is_none")] pub sort: Option<#sort_ty>,));
+            field_defs.push(quote!(#[doc = "Sort direction; defaults to ascending when omitted."] #[serde(default, skip_serializing_if = "Option::is_none")] pub order: Option<#krate::SortOrder>,));
+        }
+        if e.cfg.paginate {
+            field_defs.push(quote!(#[doc = "One-based page number."] #[serde(default, skip_serializing_if = "Option::is_none")] pub page: Option<u32>,));
+            field_defs.push(quote!(#[doc = "Requested page size."] #[serde(default, skip_serializing_if = "Option::is_none")] pub per_page: Option<u32>,));
+        }
+    }
 
     // Types holding a `secret` field get a hand-written, redacting `Debug`.
     let has_secret = fields.iter().any(|f| f.secret);
@@ -125,6 +193,20 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         }
         _ => quote!(),
     };
+    let page_request = (target == Target::Query && e.cfg.paginate).then(|| {
+        quote! {
+            impl #impl_g #name #ty_g #where_c {
+                /// Converts these query parameters to a clamped page request.
+                #[must_use]
+                pub fn page_request(&self) -> #krate::PageRequest {
+                    #krate::PageRequest::new(
+                        self.page.map_or(1, ::core::convert::Into::into),
+                        self.per_page.map_or(#krate::core::page::DEFAULT_PER_PAGE, ::core::convert::Into::into),
+                    )
+                }
+            }
+        }
+    });
     let diff = (target == Target::Update && e.cfg.diff)
         .then(|| diff_impl(e, &name, &generics, &fields, krate));
     let matches = (target == Target::Query && e.cfg.matches)
@@ -147,6 +229,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         #debug
         #validatable
         #extras
+        #page_request
         #apply
         #diff
         #matches
@@ -168,7 +251,7 @@ fn redacted_debug_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> 
     let (impl_g, ty_g, where_c) = generics.split_for_impl();
     let type_name = name.unraw().to_string();
     let entries = fields.iter().map(|f| {
-        let i = f.ident;
+        let i = &f.ident;
         let label = i.unraw().to_string();
         if f.secret {
             quote!(.field(#label, &::core::format_args!("***")))
@@ -186,7 +269,7 @@ fn redacted_debug_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> 
 }
 
 fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> TokenStream {
-    let ident = f.ident;
+    let ident = &f.ident;
     // Generated fields are always documented, so `#![warn(missing_docs)]`
     // does not fire on them.
     let fallback_doc = f.docs.is_empty().then(|| {
@@ -314,7 +397,7 @@ fn validatable_impl(
         quote!(false)
     } else {
         let checks = fields.iter().map(|f| {
-            let i = f.ident;
+            let i = &f.ident;
             if f.is_maybe(target) {
                 quote!(self.#i.is_unset())
             } else {
@@ -383,7 +466,7 @@ fn field_checks(e: &Entity, f: &Field, target: Target, krate: &TokenStream) -> O
     if f.rules.is_empty() {
         return None;
     }
-    let i = f.ident;
+    let i = &f.ident;
     let wire = LitStr::new(&wire_name(e, f, target), i.span());
     let label = quote!(__path);
     let value_ty = f.inner_ty(target);
@@ -443,10 +526,21 @@ fn builder_impls(
     let (impl_g, ty_g, where_c) = generics.split_for_impl();
 
     let default_impl = (target != Target::Create && e.cfg.helpers.default).then(|| {
-        let defaults = fields.iter().map(|f| {
-            let i = f.ident;
-            quote!(#i: ::core::default::Default::default())
-        });
+        let mut defaults: Vec<TokenStream> = fields
+            .iter()
+            .map(|f| {
+                let i = &f.ident;
+                quote!(#i: ::core::default::Default::default())
+            })
+            .collect();
+        if target == Target::Query {
+            if !e.sortable().is_empty() {
+                defaults.extend([quote!(sort: None), quote!(order: None)]);
+            }
+            if e.cfg.paginate {
+                defaults.extend([quote!(page: None), quote!(per_page: None)]);
+            }
+        }
         quote! {
             impl #impl_g ::core::default::Default for #name #ty_g #where_c {
                 fn default() -> Self {
@@ -459,12 +553,12 @@ fn builder_impls(
     let new_fn = (target == Target::Create && e.cfg.helpers.new).then(|| {
         let required: Vec<_> = fields.iter().filter(|f| !f.optional_in(target)).collect();
         let params = required.iter().map(|f| {
-            let i = f.ident;
+            let i = &f.ident;
             let ty = f.ty_in(target);
             quote!(#i: impl ::core::convert::Into<#ty>)
         });
         let inits = fields.iter().map(|f| {
-            let i = f.ident;
+            let i = &f.ident;
             if f.optional_in(target) {
                 quote!(#i: ::core::option::Option::None)
             } else {
@@ -503,7 +597,7 @@ fn builder_impls(
 }
 
 fn setters_for(f: &Field, target: Target, krate: &TokenStream) -> TokenStream {
-    let i = f.ident;
+    let i = &f.ident;
     let ty = f.inner_ty(target);
     let maybe = f.is_maybe(target);
     let optional = f.optional_in(target);
@@ -591,7 +685,7 @@ fn patch_impl(
     let entity = e.ident;
 
     let assigns = fields.iter().map(|f| {
-        let i = f.ident;
+        let i = &f.ident;
         if f.is_maybe(Target::Update) {
             return quote!(#krate::core::maybe::Maybe::apply_to(self.#i, &mut __target.#i););
         }
@@ -636,9 +730,9 @@ fn field_bounds(e: &Entity, fields: &[&Field], bounds: TokenStream) -> Vec<Token
     let names = param_names(e.generics);
     fields
         .iter()
-        .filter(|f| !names.is_disjoint(&idents_in(f.ty)))
+        .filter(|f| !names.is_disjoint(&idents_in(&f.ty)))
         .map(|f| {
-            let ty = f.ty;
+            let ty = &f.ty;
             quote!(#ty: #bounds)
         })
         .collect()
@@ -668,7 +762,7 @@ fn diff_impl(
     let entity = e.ident;
 
     let inits = fields.iter().map(|f| {
-        let i = f.ident;
+        let i = &f.ident;
         let changed = quote!(__old.#i != __new.#i);
         let value = if f.is_maybe(Target::Update) {
             quote! {
@@ -713,15 +807,55 @@ fn matches_impl(
             .predicates
             .push(parse_quote!(#pred));
     }
+    for f in fields
+        .iter()
+        .filter(|f| matches!(f.query, QueryKind::From | QueryKind::To))
+    {
+        let entity_field = f.entity_ident();
+        let ty = e
+            .fields
+            .iter()
+            .find(|source| source.ident == *entity_field)
+            .map(|source| &source.ty);
+        if let Some(ty) = ty
+            && !param_names(e.generics).is_disjoint(&idents_in(ty))
+        {
+            entity_generics
+                .make_where_clause()
+                .predicates
+                .push(parse_quote!(#ty: ::core::cmp::PartialOrd));
+        }
+    }
     let (impl_g, entity_ty_g, entity_where) = entity_generics.split_for_impl();
     let entity = e.ident;
 
     let checks = fields.iter().map(|f| {
-        let i = f.ident;
-        let eq = if f.declared_optional() {
-            quote!(__entity.#i.as_ref() == ::core::option::Option::Some(__v))
+        let i = &f.ident;
+        let entity_i = f.entity_ident();
+        let source_optional = f.source.as_ref().is_some_and(|source| {
+            e.fields
+                .iter()
+                .find(|candidate| candidate.ident == *source)
+                .is_some_and(Field::declared_optional)
+        });
+        let eq = if f.source.is_some() {
+            match f.query {
+                QueryKind::From if source_optional => {
+                    quote!(__entity.#entity_i.as_ref().is_some_and(|__value| __value >= __v))
+                }
+                QueryKind::To if source_optional => {
+                    quote!(__entity.#entity_i.as_ref().is_some_and(|__value| __value <= __v))
+                }
+                QueryKind::From => quote!(&__entity.#entity_i >= __v),
+                QueryKind::To => quote!(&__entity.#entity_i <= __v),
+                QueryKind::Contains if source_optional => quote!(__entity.#entity_i.as_ref().is_some_and(|__value| __value.contains(__v.as_str()))),
+                QueryKind::Contains => quote!(__entity.#entity_i.contains(__v.as_str())),
+                _ => quote!(__entity.#entity_i == *__v),
+            }
+        } else if f.declared_optional() {
+            quote!(__entity.#entity_i.as_ref() == ::core::option::Option::Some(__v))
         } else {
-            quote!(__entity.#i == *__v)
+            quote!(__entity.#entity_i == *__v)
         };
         quote! {
             if let ::core::option::Option::Some(__v) = &self.#i {
@@ -786,7 +920,7 @@ fn from_impl(e: &Entity, response: &Generated, krate: &TokenStream) -> TokenStre
     let entity = e.ident;
     let response_ty = response.ty();
     let moves = e.fields_for(Target::Response).into_iter().map(|f| {
-        let i = f.ident;
+        let i = &f.ident;
         let value = convert_to_override(f, Target::Response, quote!(__entity.#i), krate);
         quote!(#i: #value)
     });
@@ -801,7 +935,7 @@ fn from_impl(e: &Entity, response: &Generated, krate: &TokenStream) -> TokenStre
 
 fn entity_impl(e: &Entity, generated: &[Generated], krate: &TokenStream) -> TokenStream {
     let name = e.ident;
-    let id_ty = e.id_field().ty;
+    let id_ty = &e.id_field().ty;
     let by = |t: Target| {
         let idx = Target::ALL.iter().position(|x| *x == t).unwrap_or(0);
         generated[idx].ty()

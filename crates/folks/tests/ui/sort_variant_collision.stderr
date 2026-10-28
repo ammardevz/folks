@@ -1,0 +1,5 @@
+error: `Item::createdAt` and `created_at` both generate the `CreatedAt` sort variant; rename one field
+ --> tests/ui/sort_variant_collision.rs:9:5
+  |
+9 |     createdAt: i64,
+  |     ^^^^^^^^^

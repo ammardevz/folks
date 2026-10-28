@@ -5,3 +5,4 @@ pub mod filter;
 pub mod maybe;
 pub mod page;
 pub mod patch;
+pub mod sort;

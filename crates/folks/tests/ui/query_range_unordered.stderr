@@ -1,0 +1,5 @@
+error: `Item::active`: `query(range)` needs an ordered type such as a number, string or date, not `bool`; use `query(eq)` or remove `range`
+ --> tests/ui/query_range_unordered.rs:6:20
+  |
+6 |     #[entity(query(range))]
+  |                    ^^^^^

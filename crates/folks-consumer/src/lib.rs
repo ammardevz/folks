@@ -108,3 +108,19 @@ pub struct Profile {
     )]
     pub handle: Handle,
 }
+
+/// A paginated query entity that exercises generated range, sort and contains fields.
+#[derive(Entity)]
+#[entity(matches, query(paginate))]
+pub struct AuditRecord {
+    /// Primary key.
+    #[entity(id)]
+    pub id: u64,
+    /// Creation timestamp.
+    #[entity(readonly, query(range), sortable)]
+    #[serde(rename = "createdAt")]
+    pub created_at: i64,
+    /// Searchable label.
+    #[entity(query(contains), validate(length(max = 80)))]
+    pub label: String,
+}

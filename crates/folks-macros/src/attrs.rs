@@ -1,6 +1,7 @@
 //! Parsing of `#[entity(...)]` and the allow-listed `#[serde(...)]` keys.
 
 use proc_macro2::{Span, TokenStream};
+use quote::ToTokens;
 use syn::meta::ParseNestedMeta;
 use syn::punctuated::Punctuated;
 use syn::spanned::Spanned;
@@ -20,8 +21,8 @@ pub fn push_error(acc: &mut Option<Error>, e: Error) {
     }
 }
 
-const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, response, create, update, delete, query \
-     (each also as `create(ty = Type, rename = \"..\")`), default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
+const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, sortable, response, create, update, delete, query \
+     (each also as `create(ty = Type, rename = \"..\")`; `query(eq, range, contains)`), default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
 
 /// Options inside a per-type field flag, e.g. `create(ty = X, rename = "x")`.
 #[derive(Default, Clone)]
@@ -30,6 +31,12 @@ pub struct TargetOverride {
     pub ty: Option<(Span, Type)>,
     /// `rename = ".."`: the serde name in this generated type only.
     pub rename: Option<LitStr>,
+    /// `query(eq)`: the equality filter (the default when no mode is given).
+    pub eq: Option<Span>,
+    /// `query(range)`: `<field>_from` / `<field>_to` bounds.
+    pub range: Option<Span>,
+    /// `query(contains)`: `<field>_contains` substring filter.
+    pub contains: Option<Span>,
 }
 
 #[derive(Default)]
@@ -39,6 +46,8 @@ pub struct FieldAttrs {
     pub readonly: Option<Span>,
     pub immutable: Option<Span>,
     pub secret: Option<Span>,
+    /// `sortable`: the field is a variant of the generated sort enum.
+    pub sortable: Option<Span>,
     pub targets: Vec<(Target, Span)>,
     /// Indexed by `Target::index()`.
     pub overrides: [TargetOverride; 5],
@@ -65,6 +74,8 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 set_once(&mut out.immutable, span, "immutable")
             } else if meta.path.is_ident("secret") {
                 set_once(&mut out.secret, span, "secret")
+            } else if meta.path.is_ident("sortable") {
+                set_once(&mut out.sortable, span, "sortable")
             } else if meta.path.is_ident("clearable") {
                 if out.clearable.is_some() {
                     return Err(Error::new(span, "duplicate `clearable` option"));
@@ -130,6 +141,24 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                             }
                             slot.rename = Some(m.value()?.parse()?);
                             Ok(())
+                        } else if t == Target::Query
+                            && (m.path.is_ident("eq")
+                                || m.path.is_ident("range")
+                                || m.path.is_ident("contains"))
+                        {
+                            let mode_span = m.path.span();
+                            let mode = if m.path.is_ident("eq") {
+                                &mut slot.eq
+                            } else if m.path.is_ident("range") {
+                                &mut slot.range
+                            } else {
+                                &mut slot.contains
+                            };
+                            set_once(mode, mode_span, &m.path.to_token_stream().to_string())
+                        } else if t == Target::Query {
+                            Err(m.error(
+                                "unknown option for `query(..)`; expected one of: eq, range, contains, ty = Type, rename = \"..\"",
+                            ))
                         } else {
                             Err(m.error(format!(
                                 "unknown option for `{}(..)`; expected `ty = Type` or `rename = \"..\"`",
@@ -219,6 +248,8 @@ pub struct ContainerAttrs {
     pub diff: bool,
     /// Opt-in: `Filter` for the query request.
     pub matches: bool,
+    /// `query(paginate)`: `page` / `per_page` in the query request.
+    pub paginate: bool,
     pub schemars: bool,
     pub utoipa: bool,
     /// `rename_all` copied from the source struct's own `#[serde(..)]`.
@@ -228,8 +259,8 @@ pub struct ContainerAttrs {
 const CONTAINER_OPTIONS: &str = "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", \
      strict, patch, diff, matches, schemars, utoipa, no(..), and per-type blocks \
      response(..) / create(..) / update(..) / delete(..) / query(..)";
-const TYPE_OPTIONS: &str =
-    "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", strict";
+const TYPE_OPTIONS: &str = "name = \"..\", vis = \"..\", derive(..), serde(..), rename_all = \"..\", strict \
+     (and `paginate` in `query(..)`)";
 
 /// Options valid both on the struct (all types) and inside a per-type block.
 fn parse_common(meta: &ParseNestedMeta<'_>, cfg: &mut TypeConfig) -> Result<bool> {
@@ -310,7 +341,10 @@ pub fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
             } else if let Some(t) = Target::from_path(&meta.path) {
                 let cfg = &mut out.per_type[t.index()];
                 meta.parse_nested_meta(|m| {
-                    if m.path.is_ident("name") {
+                    if t == Target::Query && m.path.is_ident("paginate") {
+                        out.paginate = true;
+                        Ok(())
+                    } else if m.path.is_ident("name") {
                         if cfg.name.is_some() {
                             return Err(m.error("duplicate `name` option"));
                         }

@@ -48,6 +48,7 @@ pub use self::core::filter::Filter;
 pub use self::core::maybe::Maybe;
 pub use self::core::page::{Page, PageRequest};
 pub use self::core::patch::{Diff, Patch};
+pub use self::core::sort::SortOrder;
 pub use folks_macros::Entity;
 
 // Re-exported so generated code (and `#[entity(serde_as = "...")]` types) need
@@ -69,5 +70,5 @@ pub use utoipa;
 /// `.validate()`), `Patch`, `Page`.
 pub mod prelude {
     pub use crate::garde::Validate;
-    pub use crate::{Diff, Entity, Filter, Maybe, Page, PageRequest, Patch};
+    pub use crate::{Diff, Entity, Filter, Maybe, Page, PageRequest, Patch, SortOrder};
 }

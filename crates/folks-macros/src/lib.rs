@@ -18,6 +18,16 @@
 //! `created_at`); `#[entity(immutable)]` = response + create + query (set
 //! once, never updated). Neither combines with a list, `skip` or the id.
 //!
+//! # Rich query requests
+//!
+//! `#[entity(query(range))]` adds inclusive `<field>_from` and `<field>_to`
+//! bounds; `query(eq, range)` keeps equality too. `query(contains)` adds a
+//! text substring filter. `#[entity(sortable)]` adds a field to the generated
+//! `<Entity>SortField` enum and adds `sort` / `order` to the query request.
+//! `order.unwrap_or_default()` is ascending. Struct-level
+//! `#[entity(query(paginate))]` adds `page` and `per_page`, with
+//! `page_request()` converting them to the clamped `PageRequest` type.
+//!
 //! `#[entity(secret)]` marks a credential (password, token, API key). A bare
 //! `secret` means create + update only; listing `response` or `query` on a
 //! secret field, or combining it with `readonly`, `immutable`, `skip` or the

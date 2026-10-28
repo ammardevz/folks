@@ -9,7 +9,7 @@ use syn::{
 
 use crate::attrs::{self, ContainerAttrs, FieldAttrs, TargetOverride, push_error};
 use crate::rules::{self, Ctx, Rule};
-use crate::types::option_inner;
+use crate::types::{Class, classify, option_inner, show};
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Target {
@@ -73,6 +73,10 @@ impl Target {
 pub struct TargetSet(u8);
 
 impl TargetSet {
+    pub fn only(t: Target) -> Self {
+        Self::default().with(t)
+    }
+
     fn with(mut self, t: Target) -> Self {
         self.0 |= t.bit();
         self
@@ -105,10 +109,32 @@ impl Default for Helpers {
     }
 }
 
-pub struct Field<'a> {
-    pub ident: &'a Ident,
-    pub ty: &'a Type,
-    pub docs: Vec<&'a Attribute>,
+/// Which filter a field of the generated query request is.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum QueryKind {
+    /// `field`: equality (an ordinary field, the default).
+    Eq,
+    /// `field_from`: inclusive lower bound.
+    From,
+    /// `field_to`: inclusive upper bound.
+    To,
+    /// `field_contains`: substring filter.
+    Contains,
+}
+
+/// The filters `query(..)` asks for on one entity field.
+#[derive(Clone, Copy)]
+pub struct QueryModes {
+    pub eq: bool,
+    pub range: bool,
+    pub contains: bool,
+}
+
+#[derive(Clone)]
+pub struct Field {
+    pub ident: Ident,
+    pub ty: Type,
+    pub docs: Vec<Attribute>,
     pub is_id: bool,
     pub targets: TargetSet,
     /// Per-type `ty` / `rename` overrides, indexed by `Target::index()`.
@@ -118,6 +144,14 @@ pub struct Field<'a> {
     pub serde_as: Option<Type>,
     /// `#[entity(secret)]`: redacted in `Debug`, never in response or query.
     pub secret: bool,
+    /// `#[entity(sortable)]`: a variant of the generated sort enum.
+    pub sortable: bool,
+    /// Filters requested with `query(..)`; only equality unless stated.
+    pub modes: QueryModes,
+    /// What this field is in the generated query request.
+    pub query: QueryKind,
+    /// For derived query fields (`x_from`), the entity field they read.
+    pub source: Option<Ident>,
     /// Type-checked `validate(..)` rules (empty if none).
     pub rules: Vec<Rule>,
     /// `#[entity(default)]` (`Some(None)`) or `default = "path"` for create requests.
@@ -126,7 +160,7 @@ pub struct Field<'a> {
     pub clearable: bool,
 }
 
-impl Field<'_> {
+impl Field {
     /// Is the generated field a three-state `Maybe<T>` (a clearable update field)?
     pub fn is_maybe(&self, target: Target) -> bool {
         self.clearable && target == Target::Update
@@ -137,7 +171,7 @@ impl Field<'_> {
     pub fn ty_in(&self, target: Target) -> &Type {
         match &self.overrides[target.index()].ty {
             Some((_, ty)) => ty,
-            None => self.ty,
+            None => &self.ty,
         }
     }
 
@@ -171,9 +205,14 @@ impl Field<'_> {
         option_inner(self.ty_in(target)).is_some()
     }
 
+    /// The entity field this field reads (itself, unless derived).
+    pub fn entity_ident(&self) -> &Ident {
+        self.source.as_ref().unwrap_or(&self.ident)
+    }
+
     /// Is the entity's own field an `Option`?
     pub fn declared_optional(&self) -> bool {
-        option_inner(self.ty).is_some()
+        option_inner(&self.ty).is_some()
     }
 }
 
@@ -185,7 +224,8 @@ pub struct Entity<'a> {
     /// Prefix of the generated type names (`User` for `UserResponse`).
     pub base: String,
     pub cfg: ContainerAttrs,
-    pub fields: Vec<Field<'a>>,
+    pub fields: Vec<Field>,
+    pub query_fields: Vec<Field>,
     pub id: usize,
 }
 
@@ -278,17 +318,19 @@ impl<'a> Entity<'a> {
             }
         }
 
-        let entity = Entity {
+        let mut entity = Entity {
             ident: &input.ident,
             entity_vis: &input.vis,
             generics: &input.generics,
             base,
             cfg: container,
             fields,
+            query_fields: Vec::new(),
             id: 0,
         };
         entity.check_type_names()?;
-        let mut entity = entity;
+        entity.check_query_names()?;
+        entity.query_fields = entity.build_query_fields();
 
         entity.id = entity.fields.iter().position(|f| f.is_id).ok_or_else(|| {
             Error::new_spanned(&input.ident, "internal error: id field not found")
@@ -296,9 +338,125 @@ impl<'a> Entity<'a> {
         Ok(entity)
     }
 
+    /// Name of the generated sort enum (`UserSortField`).
+    pub fn sort_name(&self) -> Ident {
+        Ident::new(&format!("{}SortField", self.base), self.ident.span())
+    }
+
+    /// The `sortable` fields, in declaration order.
+    pub fn sortable(&self) -> Vec<&Field> {
+        self.fields.iter().filter(|f| f.sortable).collect()
+    }
+
+    /// The generated query request must not have two fields with one name.
+    fn check_query_names(&self) -> Result<()> {
+        let mut names: Vec<(String, String)> = Vec::new();
+        let mut add = |name: String, origin: String, span: Span| -> Result<()> {
+            if let Some((_, other)) = names.iter().find(|(n, _)| *n == name) {
+                return Err(Error::new(
+                    span,
+                    format!(
+                        "`{}`: the query request would have two fields named `{name}` ({other} and {origin}); \
+                         rename the entity field, or leave one of them out of the query request",
+                        self.ident
+                    ),
+                ));
+            }
+            names.push((name, origin));
+            Ok(())
+        };
+        for f in self
+            .fields
+            .iter()
+            .filter(|f| f.targets.contains(Target::Query))
+        {
+            let base = f.ident.unraw().to_string();
+            let origin = format!("`{base}`");
+            if f.modes.eq {
+                add(base.clone(), origin.clone(), f.ident.span())?;
+            }
+            if f.modes.range {
+                add(
+                    format!("{base}_from"),
+                    format!("`{base}` (range)"),
+                    f.ident.span(),
+                )?;
+                add(
+                    format!("{base}_to"),
+                    format!("`{base}` (range)"),
+                    f.ident.span(),
+                )?;
+            }
+            if f.modes.contains {
+                add(
+                    format!("{base}_contains"),
+                    format!("`{base}` (contains)"),
+                    f.ident.span(),
+                )?;
+            }
+        }
+        let generated = [
+            ("sort", !self.sortable().is_empty()),
+            ("order", !self.sortable().is_empty()),
+            ("page", self.cfg.paginate),
+            ("per_page", self.cfg.paginate),
+        ];
+        for (name, enabled) in generated {
+            if enabled {
+                add(
+                    name.to_owned(),
+                    "the field generated by `sortable` / `query(paginate)`".to_owned(),
+                    self.ident.span(),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
     /// Two generated types must not share a name (possible via `names(..)`).
     fn check_type_names(&self) -> Result<()> {
         let mut seen: Vec<(String, Target)> = Vec::new();
+        let mut sort_variants: Vec<(String, String)> = Vec::new();
+        for field in self.sortable() {
+            let variant = field
+                .ident
+                .unraw()
+                .to_string()
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(|part| {
+                    let mut chars = part.chars();
+                    chars
+                        .next()
+                        .map(|first| first.to_ascii_uppercase().to_string() + chars.as_str())
+                        .unwrap_or_default()
+                })
+                .collect::<String>();
+            if let Some((_, other)) = sort_variants.iter().find(|(name, _)| *name == variant) {
+                return Err(Error::new(
+                    field.ident.span(),
+                    format!(
+                        "`{}::{}` and `{other}` both generate the `{variant}` sort variant; rename one field",
+                        self.ident, field.ident
+                    ),
+                ));
+            }
+            sort_variants.push((variant, field.ident.to_string()));
+        }
+        if !self.sortable().is_empty() {
+            let sort = self.sort_name().to_string();
+            if let Some(t) = Target::ALL.into_iter().find(|t| self.type_name(*t) == sort) {
+                return Err(Error::new(
+                    self.ident.span(),
+                    format!(
+                        "the sort enum and the {} type would both be named `{sort}`; give the {} type a different name, e.g. `{}(name = \"..\")`",
+                        t.keyword(),
+                        t.keyword(),
+                        t.keyword()
+                    ),
+                ));
+            }
+        }
         for t in Target::ALL {
             let name = self.type_name(t).to_string();
             if let Some((_, other)) = seen.iter().find(|(n, _)| *n == name) {
@@ -317,7 +475,7 @@ impl<'a> Entity<'a> {
         Ok(())
     }
 
-    pub fn id_field(&self) -> &Field<'a> {
+    pub fn id_field(&self) -> &Field {
         &self.fields[self.id]
     }
 
@@ -384,16 +542,79 @@ impl<'a> Entity<'a> {
         out
     }
 
-    pub fn fields_for(&self, target: Target) -> Vec<&Field<'a>> {
+    pub fn fields_for(&self, target: Target) -> Vec<&Field> {
+        if target == Target::Query {
+            return self.query_fields.iter().collect();
+        }
         self.fields
             .iter()
             .filter(|f| f.targets.contains(target))
             .collect()
     }
+
+    fn build_query_fields(&self) -> Vec<Field> {
+        let mut fields = Vec::new();
+        for source in self
+            .fields
+            .iter()
+            .filter(|f| f.targets.contains(Target::Query))
+        {
+            if source.modes.eq {
+                fields.push(source.clone());
+            }
+            for (suffix, kind, keep_rules) in [
+                ("_from", QueryKind::From, true),
+                ("_to", QueryKind::To, true),
+                ("_contains", QueryKind::Contains, false),
+            ] {
+                if (kind == QueryKind::From || kind == QueryKind::To) && !source.modes.range
+                    || kind == QueryKind::Contains && !source.modes.contains
+                {
+                    continue;
+                }
+                let mut field = source.clone();
+                field.ident = Ident::new(
+                    &format!("{}{}", source.ident.unraw(), suffix),
+                    source.ident.span(),
+                );
+                field.ty = source.inner_ty(Target::Query).clone();
+                field.targets = TargetSet::only(Target::Query);
+                field.overrides = Default::default();
+                field.serde_always.clear();
+                field.serde_typed.clear();
+                field.serde_as = None;
+                field.is_id = false;
+                field.secret = false;
+                field.sortable = false;
+                field.modes = QueryModes {
+                    eq: false,
+                    range: false,
+                    contains: false,
+                };
+                field.query = kind;
+                field.source = Some(source.ident.clone());
+                field.clearable = false;
+                field.default = None;
+                if !keep_rules {
+                    field.rules.retain(|r| {
+                        matches!(
+                            r.kind,
+                            rules::Kind::Length { .. }
+                                | rules::Kind::Ascii
+                                | rules::Kind::Alphanumeric
+                                | rules::Kind::Custom(_)
+                        )
+                    });
+                }
+                fields.push(field);
+            }
+        }
+        fields
+    }
 }
 
-impl<'a> Field<'a> {
-    fn parse(f: &'a syn::Field, entity: &Ident, patch: bool) -> Result<(Self, Option<Span>)> {
+impl Field {
+    fn parse(f: &syn::Field, entity: &Ident, patch: bool) -> Result<(Self, Option<Span>)> {
         let ident = f
             .ident
             .as_ref()
@@ -411,6 +632,15 @@ impl<'a> Field<'a> {
             ));
         }
         let at = format!("`{entity}::{ident}`");
+        if let (Some(span), Some(_)) = (attrs.sortable, attrs.skip) {
+            return Err(Error::new(
+                span,
+                format!(
+                    "{at}: `sortable` has no effect on a skipped field; remove `sortable` or `skip`"
+                ),
+            ));
+        }
+        let modes = query_modes(&attrs.overrides[Target::Query.index()], &at, f)?;
         if attrs.serde_as.is_some()
             && let Some((span, _)) = Target::ALL
                 .iter()
@@ -475,12 +705,13 @@ impl<'a> Field<'a> {
         };
 
         let field = Field {
-            ident,
-            ty: &f.ty,
+            ident: ident.clone(),
+            ty: f.ty.clone(),
             docs: f
                 .attrs
                 .iter()
                 .filter(|a| a.path().is_ident("doc"))
+                .cloned()
                 .collect(),
             is_id: attrs.id.is_some(),
             targets,
@@ -489,12 +720,53 @@ impl<'a> Field<'a> {
             serde_typed: serde.typed,
             serde_as: attrs.serde_as,
             secret: attrs.secret.is_some(),
+            sortable: attrs.sortable.is_some(),
+            modes,
+            query: QueryKind::Eq,
+            source: None,
             rules,
             default: attrs.default.map(|(_, path)| path),
             clearable,
         };
         Ok((field, attrs.id))
     }
+}
+
+/// The filters asked for by `query(..)` (equality when none is named), with
+/// their type requirements checked against the field's query type.
+fn query_modes(ov: &TargetOverride, at: &str, f: &syn::Field) -> Result<QueryModes> {
+    let named = ov.eq.is_some() || ov.range.is_some() || ov.contains.is_some();
+    let modes = QueryModes {
+        eq: ov.eq.is_some() || !named,
+        range: ov.range.is_some(),
+        contains: ov.contains.is_some(),
+    };
+    let ty = ov.ty.as_ref().map_or(&f.ty, |(_, ty)| ty);
+    let ty = option_inner(ty).unwrap_or(ty);
+    let class = classify(ty);
+    if let Some(span) = ov.range
+        && matches!(class, Class::Collection | Class::Bool | Class::Char)
+    {
+        return Err(Error::new(
+            span,
+            format!(
+                "{at}: `query(range)` needs an ordered type such as a number, string or date, not `{}`; use `query(eq)` or remove `range`",
+                show(ty)
+            ),
+        ));
+    }
+    if let Some(span) = ov.contains
+        && !matches!(class, Class::Text | Class::Unknown)
+    {
+        return Err(Error::new(
+            span,
+            format!(
+                "{at}: `query(contains)` needs text (String or &str), not `{}`; use `query(range)` or `query(eq)` instead",
+                show(ty)
+            ),
+        ));
+    }
+    Ok(modes)
 }
 
 /// Type-check the `validate(..)` rules against the field's type in every
@@ -585,6 +857,14 @@ fn resolve_targets(attrs: &FieldAttrs, entity: &Ident, field: &Ident) -> Result<
                 ),
             ));
         }
+        if let Some(sortable) = attrs.sortable {
+            return Err(Error::new(
+                sortable,
+                format!(
+                    "{at}: a `secret` field cannot be sortable because sorting would expose it in the query API; remove `sortable`"
+                ),
+            ));
+        }
         for (keyword, span) in [("readonly", attrs.readonly), ("immutable", attrs.immutable)] {
             if let Some(span) = span {
                 return Err(Error::new(
@@ -654,7 +934,7 @@ fn resolve_targets(attrs: &FieldAttrs, entity: &Ident, field: &Ident) -> Result<
         if attrs.readonly.is_some() && attrs.immutable.is_some() {
             return Err(Error::new(span, "`readonly` conflicts with `immutable`"));
         }
-        if let Some((t, span)) = attrs.targets.first() {
+        if let Some((t, span)) = attrs.targets.iter().find(|(t, _)| *t != Target::Query) {
             return Err(Error::new(
                 *span,
                 format!(

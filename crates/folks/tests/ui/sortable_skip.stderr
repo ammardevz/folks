@@ -1,0 +1,5 @@
+error: `Item::name`: `sortable` has no effect on a skipped field; remove `sortable` or `skip`
+ --> tests/ui/sortable_skip.rs:6:20
+  |
+6 |     #[entity(skip, sortable)]
+  |                    ^^^^^^^^

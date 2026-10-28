@@ -22,6 +22,7 @@ and pagination included.
     - [Optional Fields and Nullable Updates](#optional-fields-and-nullable-updates)
     - [Builders and Conversions](#builders-and-conversions)
     - [Patch, Diff and Filter](#patch-diff-and-filter)
+    - [Richer Query Requests](#richer-query-requests)
     - [Validation](#validation)
     - [Serialization](#serialization)
     - [Configuration Reference](#configuration-reference)
@@ -71,6 +72,8 @@ differs.
 - **Patch, Diff and Filter traits**: apply an update to an entity, compute an
   update from two entities, and match an entity against a query in memory.
 - **Pagination types**: `PageRequest` and `Page<T>` with clamping and mapping.
+- **Richer query requests**: opt-in inclusive ranges, substring matching,
+  generated sort fields and integrated pagination parameters.
 - **Optional integrations** behind Cargo features: `schemars`, `utoipa`, and
   the `email`, `url` and `pattern` validation rules.
 - **Generics, lifetimes and renamed dependencies** are supported. Generated
@@ -238,7 +241,7 @@ follow the entity name and apply to multi-word names as well
 | `UserCreateRequest` | Creating an entity       | Ordinary fields, without the id                         |
 | `UserUpdateRequest` | Partial update           | Updatable fields, all optional                          |
 | `UserDeleteRequest` | Deleting an entity       | The id                                                  |
-| `UserQueryRequest`  | Filtering                | The id and ordinary fields as optional equality filters |
+| `UserQueryRequest`  | Filtering                | Optional equality, range and substring filters, plus opted-in sort/page fields |
 
 `folks::core::entity::Entity` is implemented for `User` with:
 
@@ -377,6 +380,44 @@ for example to provide a hand-written `From` implementation.
 `Patch` is always generated (disable with `no(patch)`). `Diff` and `Filter` are
 opt-in with `#[entity(diff)]` and `#[entity(matches)]`, because they require
 `Clone` and `PartialEq` on the field types.
+
+### Richer Query Requests
+
+Query fields are optional equality filters by default. Add modes to opt into
+inclusive range bounds or text substring filters. Mark fields `sortable` to
+generate a typed sort enum. `query(paginate)` adds page parameters directly to
+the same request, so one extractor handles filtering, sorting and pagination.
+
+```rust
+#[derive(Entity)]
+#[entity(matches, query(paginate))]
+struct User {
+    #[entity(id)]
+    id: u64,
+    #[entity(readonly, query(range), sortable)]
+    #[serde(rename = "createdAt")]
+    created_at: i64,
+    #[entity(query(eq))]
+    email: String,
+}
+```
+
+This accepts a request such as:
+
+```text
+GET /users?email=alice%40example.com&created_from=1700000000&sort=createdAt&order=desc&page=2
+```
+
+`query(eq, range)` exposes both `<field>` and `<field>_from` / `<field>_to`.
+`query(contains)` exposes `<field>_contains` for text. `sort` is an optional
+`UserSortField`; `order` is an optional `SortOrder`, and
+`order.unwrap_or_default()` gives ascending order. `page_request()` converts
+the optional `u32` values into a `PageRequest`, defaulting to page 1 and
+`DEFAULT_PER_PAGE`; the page size is clamped by `PageRequest`.
+
+With `matches`, equality, range and substring filters are all evaluated in
+memory. Fields with `validate(..)` rules retain those rules on range bounds;
+substring filters keep length, ASCII, alphanumeric and custom rules.
 
 ### Validation
 

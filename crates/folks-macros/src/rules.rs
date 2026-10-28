@@ -21,6 +21,7 @@ use syn::{
 use crate::attrs::push_error;
 use crate::types::{Class, classify, element_type, option_inner, show};
 
+#[derive(Clone)]
 pub struct Rule {
     pub span: Span,
     pub kind: Kind,
@@ -34,6 +35,7 @@ pub enum LengthMode {
     Utf16,
 }
 
+#[derive(Clone)]
 pub struct Number {
     pub span: Span,
     pub tokens: TokenStream,
@@ -42,6 +44,7 @@ pub struct Number {
     pub negative: bool,
 }
 
+#[derive(Clone)]
 pub enum Kind {
     Length {
         mode: LengthMode,
