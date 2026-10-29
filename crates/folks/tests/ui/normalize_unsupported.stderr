@@ -1,0 +1,11 @@
+error: `User::age`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/normalize_unsupported.rs:8:5
+  |
+8 |     age: u32,
+  |     ^^^
+
+error: `User::age`: `normalize(..)` supports only String, Option<String> or Maybe<String>, not `u32` in the create request
+ --> tests/ui/normalize_unsupported.rs:8:10
+  |
+8 |     age: u32,
+  |          ^^^

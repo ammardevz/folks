@@ -1,0 +1,5 @@
+error: `map(..)` is only valid with `#[entity(from(SourceType))]`
+ --> tests/ui/map_without_from.rs:8:5
+  |
+8 |     email: String,
+  |     ^^^^^

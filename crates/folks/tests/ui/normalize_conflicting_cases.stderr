@@ -1,0 +1,11 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/normalize_conflicting_cases.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
+error: only one casing operation may be specified
+ --> tests/ui/normalize_conflicting_cases.rs:7:35
+  |
+7 |     #[entity(normalize(lowercase, snake_case))]
+  |                                   ^^^^^^^^^^

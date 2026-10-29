@@ -4,7 +4,7 @@ error: `User::name`: this field's configuration is invalid; correct or remove th
 8 |     name: String,
   |     ^^^^
 
-error: unknown option for `create(..)`; expected `ty = Type` or `rename = ".."`
+error: unknown option for `create(..)`; expected `ty = Type`, `rename = ".."` or `validate(..)`
  --> tests/ui/override_unknown_option.rs:7:21
   |
 7 |     #[entity(create(name = "x"))]

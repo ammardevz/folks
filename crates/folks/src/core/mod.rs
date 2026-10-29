@@ -3,6 +3,7 @@ pub mod entity;
 pub mod error;
 pub mod filter;
 pub mod maybe;
+pub mod normalize;
 pub mod page;
 pub mod patch;
 pub mod sort;

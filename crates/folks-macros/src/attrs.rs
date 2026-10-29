@@ -22,7 +22,7 @@ pub fn push_error(acc: &mut Option<Error>, e: Error) {
 }
 
 const FIELD_OPTIONS: &str = "id, skip, readonly, immutable, secret, sortable, response, create, update, delete, query \
-     (each also as `create(ty = Type, rename = \"..\")`; `query(eq, range, contains)`), default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..)";
+     (each also as `create(ty = Type, rename = \"..\", validate(..))`; `query(eq, range, contains)`), default, default = \"..\", clearable, clearable = false, serde_as = \"..\", validate(..), normalize(..), map(..)";
 
 /// Options inside a per-type field flag, e.g. `create(ty = X, rename = "x")`.
 #[derive(Default, Clone)]
@@ -37,6 +37,8 @@ pub struct TargetOverride {
     pub range: Option<Span>,
     /// `query(contains)`: `<field>_contains` substring filter.
     pub contains: Option<Span>,
+    /// Validation rules replacing the shared rules for this target.
+    pub validate: Option<(Span, Vec<Rule>)>,
 }
 
 #[derive(Default)]
@@ -56,6 +58,9 @@ pub struct FieldAttrs {
     pub serde_as: Option<Type>,
     /// Span of `validate(..)` and its parsed, not yet type-checked rules.
     pub validate: Option<(Span, Vec<Rule>)>,
+    pub map_from: Option<LitStr>,
+    pub map_with: Option<Path>,
+    pub normalize: Vec<Ident>,
 }
 
 pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
@@ -128,7 +133,19 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                     }
                     let slot = &mut out.overrides[t.index()];
                     meta.parse_nested_meta(|m| {
-                        if m.path.is_ident("ty") {
+                        if m.path.is_ident("validate") {
+                            if slot.validate.is_some() {
+                                return Err(m.error("duplicate `validate` option"));
+                            }
+                            let content;
+                            parenthesized!(content in m.input);
+                            let tokens: TokenStream = content.parse()?;
+                            if tokens.is_empty() {
+                                return Err(m.error("`validate()` needs at least one rule"));
+                            }
+                            slot.validate = Some((m.path.span(), rules::parse_rules(tokens)?));
+                            Ok(())
+                        } else if m.path.is_ident("ty") {
                             if slot.ty.is_some() {
                                 return Err(m.error("duplicate `ty` option"));
                             }
@@ -157,15 +174,26 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                             set_once(mode, mode_span, &m.path.to_token_stream().to_string())
                         } else if t == Target::Query {
                             Err(m.error(
-                                "unknown option for `query(..)`; expected one of: eq, range, contains, ty = Type, rename = \"..\"",
+                                "unknown option for `query(..)`; expected one of: eq, range, contains, ty = Type, rename = \"..\", validate(..)",
                             ))
                         } else {
                             Err(m.error(format!(
-                                "unknown option for `{}(..)`; expected `ty = Type` or `rename = \"..\"`",
+                                "unknown option for `{}(..)`; expected `ty = Type`, `rename = \"..\"` or `validate(..)`",
                                 t.keyword()
                             )))
                         }
                     })?;
+                    if slot.validate.is_some()
+                        && slot.ty.is_none()
+                        && slot.rename.is_none()
+                        && slot.eq.is_none()
+                        && slot.range.is_none()
+                        && slot.contains.is_none()
+                    {
+                        // A validation-only target block overrides rules without
+                        // changing the field's established inclusion defaults.
+                        out.targets.retain(|(target, _)| *target != t);
+                    }
                 }
                 Ok(())
             } else if meta.path.is_ident("serde_as") {
@@ -199,6 +227,52 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                     return Err(Error::new(span, "`validate()` needs at least one rule"));
                 }
                 out.validate = Some((span, rules::parse_rules(tokens)?));
+                Ok(())
+            } else if meta.path.is_ident("map") {
+                let mut seen_from = false;
+                let mut seen_with = false;
+                let mut seen_any = false;
+                meta.parse_nested_meta(|m| {
+                    if m.path.is_ident("from") {
+                        seen_any = true;
+                        if seen_from { return Err(m.error("duplicate `map(from = ..)`")); }
+                        if out.map_from.is_some() { return Err(m.error("duplicate `map(from = ..)`")); }
+                        seen_from = true;
+                        let lit: LitStr = m.value()?.parse()?;
+                        lit.parse::<Ident>().map_err(|e| Error::new(e.span(), format!("`map(from)` must name a source field: {e}")))?;
+                        out.map_from = Some(lit);
+                        Ok(())
+                    } else if m.path.is_ident("with") {
+                        seen_any = true;
+                        if seen_with { return Err(m.error("duplicate `map(with = ..)`")); }
+                        if out.map_with.is_some() { return Err(m.error("duplicate `map(with = ..)`")); }
+                        seen_with = true;
+                        let lit: LitStr = m.value()?.parse()?;
+                        out.map_with = Some(lit.parse().map_err(|e| Error::new(e.span(), format!("`map(with)` must be a function path: {e}")))?);
+                        Ok(())
+                    } else {
+                        Err(m.error("expected `from = \"field\"` or `with = \"path\"`"))
+                    }
+                })?;
+                if !seen_any { return Err(meta.error("`map()` needs `from = \"field\"` or `with = \"path\"`")); }
+                Ok(())
+            } else if meta.path.is_ident("normalize") {
+                if !out.normalize.is_empty() {
+                    return Err(meta.error("duplicate `normalize` option"));
+                }
+                let mut casing = 0;
+                meta.parse_nested_meta(|m| {
+                    const OPS: &[&str] = &["trim", "trim_start", "trim_end", "collapse_whitespace", "lowercase", "uppercase", "camel_case", "pascal_case", "snake_case", "kebab_case", "screaming_snake_case", "screaming_kebab_case", "title_case", "sentence_case"];
+                    let name = m.path.get_ident().map(ToString::to_string).ok_or_else(|| m.error("expected a normalization operation"))?;
+                    if !OPS.contains(&name.as_str()) { return Err(m.error(format!("unknown normalization operation `{name}`"))); }
+                    if !["trim", "trim_start", "trim_end", "collapse_whitespace"].contains(&name.as_str()) {
+                        casing += 1;
+                        if casing > 1 { return Err(m.error("only one casing operation may be specified")); }
+                    }
+                    out.normalize.push(m.path.get_ident().unwrap().clone());
+                    Ok(())
+                })?;
+                if out.normalize.is_empty() { return Err(meta.error("`normalize()` needs at least one operation")); }
                 Ok(())
             } else {
                 Err(meta.error(format!(

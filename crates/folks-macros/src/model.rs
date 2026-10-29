@@ -155,6 +155,9 @@ pub struct Field {
     pub source: Option<Ident>,
     /// Type-checked `validate(..)` rules (empty if none).
     pub rules: Vec<Rule>,
+    pub map_from: Option<String>,
+    pub map_with: Option<Path>,
+    pub normalize: Vec<String>,
     /// `#[entity(default)]` (`Some(None)`) or `default = "path"` for create requests.
     pub default: Option<Option<LitStr>>,
     /// Update requests can set this `Option<T>` field to null.
@@ -215,6 +218,27 @@ impl Field {
     pub fn declared_optional(&self) -> bool {
         option_inner(&self.ty).is_some()
     }
+
+    pub fn rules_for(&self, target: Target) -> &[Rule] {
+        self.overrides[target.index()]
+            .validate
+            .as_ref()
+            .map_or(&self.rules, |(_, rules)| rules)
+    }
+}
+
+fn normalizable_type(ty: &Type) -> bool {
+    let Type::Path(path) = ty else {
+        return false;
+    };
+    if path.path.is_ident("String") {
+        return true;
+    }
+    path.path.segments.last().is_some_and(|segment| {
+        (segment.ident == "Option" || segment.ident == "Maybe")
+            && matches!(&segment.arguments, syn::PathArguments::AngleBracketed(args)
+                if args.args.len() == 1 && matches!(args.args.first(), Some(syn::GenericArgument::Type(Type::Path(inner))) if inner.path.is_ident("String")))
+    })
 }
 
 pub struct Entity<'a> {
@@ -336,6 +360,17 @@ impl<'a> Entity<'a> {
         }
         if let Some(e) = errors {
             return Err(e);
+        }
+
+        if container.from_types.is_empty()
+            && let Some(field) = fields
+                .iter()
+                .find(|f| f.map_from.is_some() || f.map_with.is_some())
+        {
+            return Err(Error::new(
+                field.ident.span(),
+                "`map(..)` is only valid with `#[entity(from(SourceType))]`",
+            ));
         }
 
         // `diff` and `matches` compare the entity's field with the request's
@@ -622,6 +657,7 @@ impl<'a> Entity<'a> {
                     source.ident.span(),
                 );
                 field.ty = source.inner_ty(Target::Query).clone();
+                field.rules = source.rules_for(Target::Query).to_vec();
                 field.targets = TargetSet::only(Target::Query);
                 field.overrides = Default::default();
                 field.serde_always.clear();
@@ -685,6 +721,46 @@ impl Field {
             ));
         }
         let modes = query_modes(&attrs.overrides[Target::Query.index()], &at, f)?;
+        if !attrs.normalize.is_empty() {
+            if ![
+                Target::Create,
+                Target::Update,
+                Target::Delete,
+                Target::Query,
+            ]
+            .into_iter()
+            .any(|target| targets.contains(target))
+            {
+                return Err(Error::new(
+                    ident.span(),
+                    format!("{at}: `normalize(..)` needs the field in a request DTO"),
+                ));
+            }
+            for target in [
+                Target::Create,
+                Target::Update,
+                Target::Delete,
+                Target::Query,
+            ] {
+                if !targets.contains(target) {
+                    continue;
+                }
+                let ty = attrs.overrides[target.index()]
+                    .ty
+                    .as_ref()
+                    .map_or(&f.ty, |(_, ty)| ty);
+                if !normalizable_type(ty) {
+                    return Err(Error::new(
+                        ty.span(),
+                        format!(
+                            "{at}: `normalize(..)` supports only String, Option<String> or Maybe<String>, not `{}` in the {} request",
+                            show(ty),
+                            target.keyword()
+                        ),
+                    ));
+                }
+            }
+        }
         if attrs.serde_as.is_some()
             && let Some((span, _)) = Target::ALL
                 .iter()
@@ -704,6 +780,20 @@ impl Field {
                 rules
             }
         };
+        for t in Target::ALL {
+            if let Some((span, rules)) = &attrs.overrides[t.index()].validate {
+                if !targets.contains(t) || t == Target::Response {
+                    return Err(Error::new(
+                        *span,
+                        format!(
+                            "`{}(validate(..))` requires this field in a request DTO",
+                            t.keyword()
+                        ),
+                    ));
+                }
+                check_rules(rules, f, &attrs.overrides, TargetSet::only(t), *span)?;
+            }
+        }
 
         // Explicit `clearable` is validated; the struct-level `patch` mode only
         // applies where it can (an `Option<T>` field in update requests
@@ -769,6 +859,9 @@ impl Field {
             query: QueryKind::Eq,
             source: None,
             rules,
+            map_from: attrs.map_from.map(|s| s.value()),
+            map_with: attrs.map_with,
+            normalize: attrs.normalize.iter().map(ToString::to_string).collect(),
             default: attrs.default.map(|(_, path)| path),
             clearable,
         };

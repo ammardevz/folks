@@ -49,10 +49,13 @@ fn source_from_impls(e: &Entity, response: &Generated) -> Vec<TokenStream> {
             let fields = e.fields_for(Target::Response).into_iter().map(|field| {
                 let ident = &field.ident;
                 let ty = field.ty_in(Target::Response);
-                let convert = if option_inner(ty).is_some() {
-                    quote_spanned!(ident.span()=> __source.#ident.map(::core::convert::Into::into))
+                let source_ident = field.map_from.as_ref().map(|name| Ident::new(name, ident.span())).unwrap_or_else(|| ident.clone());
+                let convert = if let Some(path) = &field.map_with {
+                    quote_spanned!(ident.span()=> #path(__source.#source_ident))
+                } else if option_inner(ty).is_some() {
+                    quote_spanned!(ident.span()=> __source.#source_ident.map(::core::convert::Into::into))
                 } else {
-                    quote_spanned!(ident.span()=> ::core::convert::Into::into(__source.#ident))
+                    quote_spanned!(ident.span()=> ::core::convert::Into::into(__source.#source_ident))
                 };
                 quote!(#ident: #convert)
             });
@@ -185,7 +188,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
     );
     let mut field_defs: Vec<TokenStream> = fields
         .iter()
-        .map(|f| field_def(f, target, krate, e.cfg.utoipa))
+        .map(|f| field_def(f, target, krate, e.cfg.utoipa, &name))
         .collect();
     if target == Target::Query {
         if !e.sortable().is_empty() {
@@ -222,6 +225,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         quote!(#[schemars(crate = #path)])
     });
     let validatable = validatable_impl(e, &name, &generics, &fields, target, krate);
+    let normalizers = normalization_helpers(&name, &fields, target, krate);
     let extras = match target {
         Target::Create | Target::Update | Target::Query => {
             builder_impls(e, target, &name, &generics, &fields, krate)
@@ -269,6 +273,7 @@ fn generate(e: &Entity, target: Target, krate: &TokenStream) -> Generated {
         #apply
         #diff
         #matches
+        #normalizers
     };
     Generated {
         name,
@@ -305,7 +310,13 @@ fn redacted_debug_impl(name: &Ident, generics: &Generics, fields: &[&Field]) -> 
     }
 }
 
-fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> TokenStream {
+fn field_def(
+    f: &Field,
+    target: Target,
+    krate: &TokenStream,
+    utoipa: bool,
+    type_name: &Ident,
+) -> TokenStream {
     let ident = &f.ident;
     // Generated fields are always documented, so `#![warn(missing_docs)]`
     // does not fire on them.
@@ -370,6 +381,11 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
             }
         }
     }
+    if target != Target::Response && !f.normalize.is_empty() {
+        let helper = normalize_helper_name(type_name, &f.ident, target);
+        let path = LitStr::new(&helper.to_string(), Span::call_site());
+        serde.push(quote!(deserialize_with = #path));
+    }
     let serde_attr = (!serde.is_empty()).then(|| quote!(#[serde(#(#serde),*)]));
 
     // `serde_as` is declared for the inner type; wrap it in `Option` exactly
@@ -395,6 +411,48 @@ fn field_def(f: &Field, target: Target, krate: &TokenStream, utoipa: bool) -> To
         #utoipa_attr
         pub #ident: #field_ty,
     }
+}
+
+fn normalize_helper_name(type_name: &Ident, field: &Ident, target: Target) -> Ident {
+    Ident::new(
+        &format!(
+            "__folks_normalize_{}_{}_{}",
+            type_name.unraw(),
+            target.keyword(),
+            field.unraw()
+        ),
+        field.span(),
+    )
+}
+
+fn normalization_helpers(
+    type_name: &Ident,
+    fields: &[&Field],
+    target: Target,
+    krate: &TokenStream,
+) -> TokenStream {
+    if target == Target::Response {
+        return quote!();
+    }
+    let helpers = fields.iter().filter(|f| !f.normalize.is_empty()).map(|f| {
+        let helper = normalize_helper_name(type_name, &f.ident, target);
+        let ops = f.normalize.iter().map(|op| {
+            let variant = Ident::new(&op.split('_').map(|part| { let mut c=part.chars(); c.next().map(|x| x.to_ascii_uppercase().to_string()+c.as_str()).unwrap_or_default() }).collect::<String>(), f.ident.span());
+            quote!(#krate::core::normalize::Operation::#variant)
+        });
+        quote! {
+            #[doc(hidden)]
+            #[allow(non_snake_case)]
+            fn #helper<'__de, __D, __T>(__deserializer: __D) -> ::core::result::Result<__T, __D::Error>
+            where
+                __D: #krate::serde::Deserializer<'__de>,
+                __T: #krate::serde::Deserialize<'__de> + #krate::core::normalize::Normalize,
+            {
+                #krate::core::normalize::deserialize(__deserializer, &[#(#ops),*])
+            }
+        }
+    });
+    quote!(#(#helpers)*)
 }
 
 /// The name `f` has on the wire in `target`, which is what clients see in
@@ -502,7 +560,8 @@ fn validatable_impl(
 /// Optional values are checked only when present (`Some` / `Maybe::Set`);
 /// `required` is enforced on the `Option` itself, in create requests only.
 fn field_checks(e: &Entity, f: &Field, target: Target, krate: &TokenStream) -> Option<TokenStream> {
-    if f.rules.is_empty() {
+    let rules_for_target = f.rules_for(target);
+    if rules_for_target.is_empty() {
         return None;
     }
     let i = &f.ident;
@@ -511,27 +570,73 @@ fn field_checks(e: &Entity, f: &Field, target: Target, krate: &TokenStream) -> O
     let value_ty = f.inner_ty(target);
 
     let required = (target == Target::Create && f.optional_in_source(target))
-        .then(|| f.rules.iter().find(|r| matches!(r.kind, Kind::Required)))
+        .then(|| {
+            rules_for_target
+                .iter()
+                .find(|r| matches!(r.kind, Kind::Required))
+        })
         .flatten()
         .map(|r| rules::emit_required(r, &quote!(&self.#i), &label, krate));
 
     let value_checks = if f.is_maybe(target) {
-        let body = rules::emit(&f.rules, value_ty, &quote!(__v), &label, krate);
+        let body = if f.normalize.is_empty() {
+            rules::emit(rules_for_target, value_ty, &quote!(__v), &label, krate)
+        } else {
+            rules::emit(
+                rules_for_target,
+                value_ty,
+                &quote!(&__normalized),
+                &label,
+                krate,
+            )
+        };
         (!body.is_empty()).then(|| {
+            let normalized = (!f.normalize.is_empty()).then(|| {
+                let ops = normalize_ops(f, krate);
+                quote!(let __normalized = #krate::core::normalize::Normalize::normalize(::core::clone::Clone::clone(__v), &[#(#ops),*]);)
+            });
             quote! {
-                if let #krate::core::maybe::Maybe::Set(__v) = &self.#i { #body }
+                if let #krate::core::maybe::Maybe::Set(__v) = &self.#i { #normalized #body }
             }
         })
     } else if f.optional_in(target) {
-        let body = rules::emit(&f.rules, value_ty, &quote!(__v), &label, krate);
+        let body = if f.normalize.is_empty() {
+            rules::emit(rules_for_target, value_ty, &quote!(__v), &label, krate)
+        } else {
+            rules::emit(
+                rules_for_target,
+                value_ty,
+                &quote!(&__normalized),
+                &label,
+                krate,
+            )
+        };
         (!body.is_empty()).then(|| {
+            let normalized = (!f.normalize.is_empty()).then(|| {
+                let ops = normalize_ops(f, krate);
+                quote!(let __normalized = #krate::core::normalize::Normalize::normalize(::core::clone::Clone::clone(__v), &[#(#ops),*]);)
+            });
             quote! {
-                if let ::core::option::Option::Some(__v) = &self.#i { #body }
+                if let ::core::option::Option::Some(__v) = &self.#i { #normalized #body }
             }
         })
     } else {
-        let body = rules::emit(&f.rules, value_ty, &quote!(&self.#i), &label, krate);
-        (!body.is_empty()).then_some(body)
+        let body = if f.normalize.is_empty() {
+            rules::emit(rules_for_target, value_ty, &quote!(&self.#i), &label, krate)
+        } else {
+            rules::emit(
+                rules_for_target,
+                value_ty,
+                &quote!(&__normalized),
+                &label,
+                krate,
+            )
+        };
+        let normalized = (!f.normalize.is_empty()).then(|| {
+            let ops = normalize_ops(f, krate);
+            quote!(let __normalized = #krate::core::normalize::Normalize::normalize(::core::clone::Clone::clone(&self.#i), &[#(#ops),*]);)
+        });
+        (!body.is_empty()).then(|| quote!({ #normalized #body }))
     };
 
     match (required, value_checks) {
@@ -602,7 +707,8 @@ fn builder_impls(
             if f.optional_in(target) {
                 quote!(#i: ::core::option::Option::None)
             } else {
-                quote!(#i: ::core::convert::Into::into(#i))
+                let value = normalize_expr(f, quote!(::core::convert::Into::into(#i)), krate);
+                quote!(#i: #value)
             }
         });
         quote! {
@@ -644,7 +750,7 @@ fn setters_for(f: &Field, target: Target, krate: &TokenStream) -> TokenStream {
     let optional = f.optional_in(target);
     let name = i.unraw();
     let with = Ident::new(&format!("with_{name}"), i.span());
-    let into = quote!(::core::convert::Into::into(value));
+    let into = normalize_expr(f, quote!(::core::convert::Into::into(value)), krate);
 
     let wrap = |expr: TokenStream| {
         if maybe {
@@ -709,6 +815,34 @@ fn setters_for(f: &Field, target: Target, krate: &TokenStream) -> TokenStream {
         #opt
         #nullable
     }
+}
+
+fn normalize_expr(f: &Field, value: TokenStream, krate: &TokenStream) -> TokenStream {
+    if f.normalize.is_empty() {
+        return value;
+    }
+    let ops = normalize_ops(f, krate);
+    quote!(#krate::core::normalize::Normalize::normalize(#value, &[#(#ops),*]))
+}
+
+fn normalize_ops(f: &Field, krate: &TokenStream) -> Vec<TokenStream> {
+    f.normalize
+        .iter()
+        .map(|op| {
+            let variant = Ident::new(
+                &op.split('_')
+                    .map(|part| {
+                        let mut c = part.chars();
+                        c.next()
+                            .map(|x| x.to_ascii_uppercase().to_string() + c.as_str())
+                            .unwrap_or_default()
+                    })
+                    .collect::<String>(),
+                f.ident.span(),
+            );
+            quote!(#krate::core::normalize::Operation::#variant)
+        })
+        .collect()
 }
 
 /// `impl Patch<Entity> for UpdateRequest`: copies every supplied field over.

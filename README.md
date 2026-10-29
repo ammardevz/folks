@@ -23,9 +23,10 @@ and pagination included.
     - [Builders and Conversions](#builders-and-conversions)
     - [Patch, Diff and Filter](#patch-diff-and-filter)
     - [Richer Query Requests](#richer-query-requests)
+    - [Field Normalization](#field-normalization)
     - [Validation](#validation)
     - [Serialization](#serialization)
-    - [Configuration Reference](#configuration-reference)
+    - [Attribute Reference](#attribute-reference)
     - [Pagination](#pagination)
     - [Integrations](#integrations)
 - [Cargo Features](#cargo-features)
@@ -178,58 +179,26 @@ cargo test --workspace --all-features
 
 ```rust
 use folks::prelude::*;
-use uuid::Uuid;
 
 #[derive(Entity)]
-#[entity(patch, strict, rename_all = "camelCase")]
-pub struct User {
+struct User {
     #[entity(id)]
-    pub id: Uuid,
-
-    #[entity(validate(length(min = 1, max = 64)))]
-    pub name: String,
-
-    #[entity(validate(range(min = 13, max = 120)))]
-    pub age: u8,
-
-    pub bio: Option<String>,
-
-    #[entity(readonly)]
-    pub created_at: String,
-
-    #[entity(skip)]
-    pub password_hash: String,
+    id: u64,
+    #[entity(validate(length(min = 1, max = 80)))]
+    name: String,
+    bio: Option<String>,
 }
 
-fn example(mut user: User) -> Result<(), folks::Error> {
-    // Create: required fields in `new`, optional fields through setters.
-    let create = UserCreateRequest::new("Ann", 30u8).with_bio("Systems programmer");
-    create.validate()?;
-
-    // Every failed rule is reported, under the field's serialized name.
-    let invalid = UserCreateRequest::new("", 5u8);
-    assert_eq!(
-        folks::Error::from(invalid.validate().unwrap_err()).to_string(),
-        "validation error: name: length is lower than 1; age: lower than 13"
-    );
-
-    // Update: change the name, clear the bio, leave everything else untouched.
-    UserUpdateRequest::default()
-        .with_name("Ann Lee")
-        .clear_bio()
-        .apply_to(&mut user);
-
-    // Entity to response in one call.
-    let response: UserResponse = user.into();
-
-    // Paginate.
-    let page = Page::new(vec![response], 41, &PageRequest::new(2, 20));
-    assert_eq!(page.total_pages(), 3);
+fn create_user() -> Result<(), folks::Error> {
+    let request = UserCreateRequest::new("Amina").with_bio("Engineer");
+    request.validate()?;
     Ok(())
 }
 ```
 
-This example uses the `uuid` crate with its `serde` feature enabled.
+This one definition generates `UserResponse`, `UserCreateRequest`,
+`UserUpdateRequest`, `UserDeleteRequest` and `UserQueryRequest`. The sections
+below show how to customize which fields appear and how each DTO behaves.
 
 ## Usage
 
@@ -442,6 +411,30 @@ With `matches`, equality, range and substring filters are all evaluated in
 memory. Fields with `validate(..)` rules retain those rules on range bounds;
 substring filters keep length, ASCII, alphanumeric and custom rules.
 
+### Field Normalization
+
+`normalize(..)` transforms request values in order during deserialization and
+through generated constructors and setters. It supports `String`,
+`Option<String>` and clearable `Maybe<String>` fields; absent attributes leave
+values untouched.
+
+```rust
+#[entity(normalize(trim, lowercase))]
+email: String,
+#[entity(normalize(trim, collapse_whitespace))]
+name: String,
+#[entity(normalize(snake_case))]
+permission: String,
+```
+
+Whitespace operations are `trim`, `trim_start`, `trim_end` and
+`collapse_whitespace`. Casing operations are `lowercase`, `uppercase`,
+`camel_case`, `pascal_case`, `snake_case`, `kebab_case`,
+`screaming_snake_case`, `screaming_kebab_case`, `title_case` and
+`sentence_case`. At most one casing operation may be specified. Public fields
+can still be assigned directly, which bypasses normalization; use the generated
+constructors/setters or deserialize request data to store normalized input.
+
 ### Validation
 
 Validation is configured per field with `#[entity(validate(rule, rule, ..))]`.
@@ -456,6 +449,17 @@ do not need a `garde` dependency.
 #[entity(validate(each(length(min = 1, max = 16))))]      tags: Vec<String>,
 #[entity(validate(custom(is_slug)))]                      slug: String,
 ```
+
+Target blocks on a field may replace the shared rules for one request type:
+
+```rust
+#[entity(validate(length(min = 8)), create(validate(length(min = 12))), update(validate(length(min = 16))))]
+password: String,
+```
+
+The shared rules apply to request DTOs without an override; an explicit
+`create(validate(..))`, `update(validate(..))`, `delete(validate(..))` or
+`query(validate(..))` replaces them for that DTO.
 
 | Rule                                             | Applies to                                               | Notes                                                                                         |
 | ------------------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
@@ -529,7 +533,7 @@ Generated types derive `Serialize` and `Deserialize` using
   the generated field is optional, and `#[serde_as]` is added to the generated
   struct as needed.
 
-### Configuration Reference
+### Attribute Reference
 
 Struct-level options go in `#[entity(..)]`, which may be split across several
 attributes. Shared options apply to every generated type; a per-type block
@@ -561,14 +565,98 @@ pub struct User { /* .. */ }
 | `patch`              | Every `Option<T>` field becomes clearable                                    |
 | `diff`, `matches`    | Opt-in `Diff` and `Filter` implementations                                   |
 | `schemars`, `utoipa` | Opt-in schema derives (require the matching Cargo feature)                   |
+| `from(Type)`         | Generates `From<Type> for Response`; repeat for multiple source types        |
 | `no(..)`             | Disables `from`, `setters`, `patch`, `default` or `new`                      |
 
 Per-type blocks accept `name`, `vis`, `derive`, `serde`, `rename_all` and
-`strict`.
+`strict`. `query(paginate)` is also available inside the query block.
 
-Field options: `id`, `skip`, `readonly`, `immutable`, `response`, `create`,
-`update`, `delete`, `query`, `default`, `default = "path"`, `clearable`,
-`clearable = false`, `serde_as = ".."`, and `validate(..)`.
+#### Field attributes
+
+| Attribute | Purpose |
+| --- | --- |
+| `id` | Marks the required identifier field. |
+| `skip` | Excludes a field from generated DTOs. |
+| `readonly` / `immutable` | Restricts a field to response/query, or response/create/query, respectively. |
+| `secret` | Accepts a field on input, omits it from responses and redacts generated `Debug` output. |
+| `sortable` | Adds a field to the generated query sort enum. |
+| `response`, `create`, `update`, `delete`, `query` | Selects the DTOs that contain a field. Each target can accept `ty = Type` and `rename = "wireName"`; query also accepts `eq`, `range` and `contains`. |
+| `default` / `default = "path"` | Supplies a create value when the field is omitted. The function form returns the create field type. |
+| `clearable` / `clearable = false` | Enables or opts out of null-clearing for an `Option<T>` update field. |
+| `serde_as = "Adapter"` | Applies a `serde_with` adapter to the field. |
+| `validate(..)` | Adds shared Garde rules to applicable request DTOs. |
+| `create(validate(..))`, `update(validate(..))`, `delete(validate(..))`, `query(validate(..))` | Replaces shared validation rules for that request DTO. A validation-only block keeps the field’s default inclusion. |
+| `normalize(..)` | Normalizes request values during deserialization, generated setters, and validation. |
+| `map(..)` | Maps a source-model field in the `from(SourceType)` response conversion. |
+
+Most attributes can be combined when their purposes do not conflict. For
+example, this field is immutable, renamed on the wire, and validated:
+
+```rust
+#[entity(immutable, validate(length(min = 2, max = 80)))]
+#[serde(rename = "displayName")]
+name: String,
+```
+
+#### Customizing one generated DTO
+
+Use a target block when a request or response needs a different field type or
+wire name. These options also include the field in that target DTO:
+
+```rust
+#[entity(
+    response(ty = String, rename = "emailAddress"),
+    create(ty = String),
+    update(ty = String),
+)]
+email: Email,
+```
+
+`ty = Type` changes the generated field type; conversion uses `Into` for
+responses and `From` for applying updates. `rename = ".."` changes that DTO’s
+serde name and its validation error path. Validation-only target blocks are an
+exception: they replace rules without changing normal field inclusion.
+
+#### Mapping a source model
+
+Declare one or more source types on the entity. Fields map by the same Rust
+name by default. Use `from` to select a different source field and `with` when
+the value needs an explicit conversion:
+
+```rust
+#[derive(Entity)]
+#[entity(from(crate::model::UserModel))]
+struct User {
+    #[entity(id)]
+    id: u64,
+    #[entity(map(from = "email_address"))]
+    email: String,
+    #[entity(map(from = "disabled_at", with = "crate::mapping::is_disabled"))]
+    disabled: bool,
+}
+```
+
+The conversion function takes the selected source field by value and returns
+the response field type. Mapping applies only to `From<Source> for Response`.
+
+#### Normalizing request fields
+
+List operations in the order they should run. Whitespace operations are
+`trim`, `trim_start`, `trim_end` and `collapse_whitespace`. Casing operations
+are `lowercase`, `uppercase`, `camel_case`, `pascal_case`, `snake_case`,
+`kebab_case`, `screaming_snake_case`, `screaming_kebab_case`, `title_case` and
+`sentence_case`. Use at most one casing operation per field:
+
+```rust
+#[entity(normalize(trim, lowercase))]
+email: String,
+#[entity(normalize(trim, collapse_whitespace))]
+name: String,
+```
+
+Supported field types are `String`, `Option<String>` and `Maybe<String>` where
+the generated DTO shape permits them. A direct assignment to a public field
+does not rewrite its stored value; validation checks a normalized copy.
 
 `#[entity(default)]` and `#[entity(default = "path::to_fn")]` fill a field when
 a create request omits it.

@@ -67,6 +67,113 @@ pub struct Everything {
     pub list: Vec<String>,
 }
 
+#[derive(Entity)]
+pub struct PasswordRules {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(
+        validate(length(min = 2)),
+        create(validate(length(min = 4))),
+        update(validate(length(min = 6)))
+    )]
+    pub password: String,
+}
+
+#[test]
+fn target_validation_rules_replace_shared_rules() {
+    assert!(
+        PasswordRulesCreateRequest {
+            password: "four".into()
+        }
+        .validate()
+        .is_ok()
+    );
+    assert_eq!(
+        names(
+            PasswordRulesCreateRequest {
+                password: "abc".into()
+            }
+            .validate()
+        ),
+        ["password"]
+    );
+    assert!(
+        PasswordRulesUpdateRequest::default()
+            .with_password("123456")
+            .validate()
+            .is_ok()
+    );
+    assert_eq!(
+        names(
+            PasswordRulesUpdateRequest::default()
+                .with_password("1234")
+                .validate()
+        ),
+        ["password"]
+    );
+    // Query does not override, so it inherits the shared minimum of two.
+    assert!(
+        PasswordRulesQueryRequest {
+            password: Some("ab".into()),
+            ..Default::default()
+        }
+        .validate()
+        .is_ok()
+    );
+}
+
+#[derive(Entity)]
+pub struct NormalizedInput {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(normalize(trim, lowercase), validate(length(equal = 16)))]
+    pub email: String,
+    #[entity(normalize(trim, collapse_whitespace))]
+    pub name: String,
+    #[entity(normalize(snake_case))]
+    pub permission: String,
+    #[entity(clearable, normalize(trim, lowercase))]
+    pub note: Option<String>,
+}
+
+#[test]
+fn normalized_values_keep_operation_order_and_maybe_states() {
+    let request: NormalizedInputCreateRequest = serde_json::from_str(
+        r#"{"email":"  Ada@EXAMPLE.test  ","name":"  Ada   Lovelace ","permission":"Read Access","note":null}"#,
+    )
+    .unwrap();
+    assert_eq!(request.email, "ada@example.test");
+    assert_eq!(request.name, "Ada Lovelace");
+    assert_eq!(request.permission, "read_access");
+    assert_eq!(request.note, None);
+    assert!(request.validate().is_ok());
+    let direct = NormalizedInputCreateRequest {
+        email: "  ADA@EXAMPLE.TEST  ".into(),
+        name: "Ada Lovelace".into(),
+        permission: "read_access".into(),
+        note: None,
+    };
+    assert!(direct.validate().is_ok());
+    let request = NormalizedInputCreateRequest::new("  A@B.CO  ", "  Ada   L ", "Read Access")
+        .with_note("  HELLO ");
+    assert_eq!(request.email, "a@b.co");
+    assert_eq!(request.note.as_deref(), Some("hello"));
+
+    let unset = NormalizedInputUpdateRequest::default();
+    assert!(unset.note.is_unset());
+    let cleared = NormalizedInputUpdateRequest::default().clear_note();
+    assert!(cleared.note.is_null());
+    let set = NormalizedInputUpdateRequest::default().with_note("  HELLO ");
+    assert_eq!(set.note, folks::Maybe::Set("hello".into()));
+    let omitted: NormalizedInputUpdateRequest = serde_json::from_str("{}").unwrap();
+    assert!(omitted.note.is_unset());
+    let null: NormalizedInputUpdateRequest = serde_json::from_str(r#"{"note":null}"#).unwrap();
+    assert!(null.note.is_null());
+    let value: NormalizedInputUpdateRequest =
+        serde_json::from_str(r#"{"note":"  HELLO "}"#).unwrap();
+    assert_eq!(value.note, folks::Maybe::Set("hello".into()));
+}
+
 fn good() -> EverythingCreateRequest {
     EverythingCreateRequest {
         short: "abc".into(),
