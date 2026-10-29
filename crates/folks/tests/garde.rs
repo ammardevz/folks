@@ -93,6 +93,19 @@ fn report_converts_to_folks_error() {
 }
 
 #[test]
+fn display_handles_request_level_and_field_errors() {
+    let err = Error::Invalid(vec![
+        FieldError::new("", "request-level failure"),
+        FieldError::new("name", "is invalid"),
+    ]);
+
+    assert_eq!(
+        err.to_string(),
+        "validation error: request-level failure; name: is invalid"
+    );
+}
+
+#[test]
 fn question_mark_works_in_handlers() {
     fn handler(r: &AccountCreateRequest) -> Result<(), Error> {
         r.validate()?;

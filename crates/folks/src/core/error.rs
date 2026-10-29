@@ -3,6 +3,9 @@ use std::fmt;
 use thiserror::Error;
 
 /// One failed validation rule on one field.
+///
+/// Its [`std::fmt::Display`] output is `field: message`; when `field` is empty for a
+/// request-level failure, it is just `message`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "schemars", derive(schemars::JsonSchema))]
 #[cfg_attr(feature = "utoipa", derive(utoipa::ToSchema))]
@@ -32,7 +35,11 @@ impl From<&(garde::Path, garde::Error)> for FieldError {
 
 impl fmt::Display for FieldError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}: {}", self.field, self.message)
+        if self.field.is_empty() {
+            f.write_str(&self.message)
+        } else {
+            write!(f, "{}: {}", self.field, self.message)
+        }
     }
 }
 
