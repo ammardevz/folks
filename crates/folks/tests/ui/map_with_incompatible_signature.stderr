@@ -1,15 +1,15 @@
 error[E0308]: mismatched types
-  --> tests/ui/map_with_incompatible_signature.rs:18:5
+  --> tests/ui/map_with_incompatible_signature.rs:20:5
    |
-17 |     #[entity(map(from = "disabled_at", with = "is_set"))]
+19 |     #[entity(map(from = "disabled_at", with = "is_set"))]
    |                                               -------- arguments to this function are incorrect
-18 |     disabled: bool,
-   |     ^^^^^^^^ expected `String`, found `Option<u64>`
+20 |     disabled: bool,
+   |     ^^^^^^^^ expected `Incompatible`, found `Option<u64>`
    |
-   = note: expected struct `std::string::String`
+   = note: expected struct `Incompatible`
                 found enum `std::option::Option<u64>`
 note: function defined here
-  --> tests/ui/map_with_incompatible_signature.rs:8:4
+  --> tests/ui/map_with_incompatible_signature.rs:10:4
    |
- 8 | fn is_set(value: String) -> bool {
-   |    ^^^^^^ -------------
+10 | fn is_set(_value: Incompatible) -> bool {
+   |    ^^^^^^ --------------------

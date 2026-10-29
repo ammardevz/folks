@@ -1,0 +1,11 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/validate_target_override_on_skipped.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
+error: `create(validate(..))` requires this field in a request DTO
+ --> tests/ui/validate_target_override_on_skipped.rs:7:27
+  |
+7 |     #[entity(skip, create(validate(length(min = 1))))]
+  |                           ^^^^^^^^

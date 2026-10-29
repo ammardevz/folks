@@ -199,16 +199,21 @@ contain the field.
 | `serde_as = "Adapter"` | Applies a `serde_with` adapter to the field's inner type. | Incompatible with type overrides and clearable fields. |
 
 An explicit list such as `#[entity(response, create)]` includes a field in
-exactly those DTOs. See [per-DTO field overrides](#per-dto-field-overrides).
-A validation-only block such as `create(validate(...))` changes the rules but
-retains the field's default inclusion when no explicit target list is present.
-With a target list, include every DTO that should contain the field.
+exactly those DTOs. A target block with options also includes that target. A
+validation-only block preserves the default inclusion set when used alone; if
+an explicit list is present, it adds its target to that list. For example,
+`#[entity(response, create(validate(length(min = 4))))]` includes the field in
+response and create. `skip` still excludes the field and conflicts with target
+inclusion. See [per-DTO field overrides](#per-dto-field-overrides).
 
 ### Per-DTO field overrides
 
 The `response`, `create`, `update`, `delete`, and `query` field blocks accept
-`ty = Type`, `rename = "wireName"`, and `validate(...)`. Each block includes
-the field unless it contains only `validate(...)`.
+`ty = Type` and `rename = "wireName"`. Request blocks (`create`, `update`,
+`delete`, and `query`) also accept `validate(...)`; response fields are not
+validated. Blocks with type or name options include their target.
+Validation-only blocks preserve default inclusion when used alone and add
+their target when combined with an explicit target list.
 
 ```rust
 use folks::Entity;
@@ -359,8 +364,8 @@ struct Credentials {
 ```
 
 Here create enforces a minimum length of 12, update enforces 16, and other
-applicable request DTOs inherit the shared minimum of 8. A validation-only
-block leaves the field's normal inclusion unchanged.
+applicable request DTOs inherit the shared minimum of 8. Without an explicit
+target list, the default DTO inclusion remains in effect.
 
 ### Validation rule reference
 
@@ -629,7 +634,7 @@ provided in the sections above.
 | `readonly` | Response and query. | Non-id field; cannot combine with target lists other than `query`. | `#[entity(readonly)]` |
 | `immutable` | Response, create, query. | Non-id field; cannot combine with target lists other than `query`. | `#[entity(immutable)]` |
 | `secret` | Create and update; redacted in generated `Debug`. | Not response/query/id/readonly/immutable/skip/sortable. | `#[entity(secret)]` |
-| `response`, `create`, `update`, `delete`, `query` | Ordinary defaults unless a target list is present. | Selects exactly the listed DTOs; query is optional and id has restrictions. | `#[entity(response, create)]` |
+| `response`, `create`, `update`, `delete`, `query` | Ordinary defaults unless a target selection is present. | Bare flags and blocks with type/name options select their targets. Validation-only request blocks augment an explicit selection. Query is optional and id has restrictions. | `#[entity(response, create)]` |
 | `target(ty = T)` | Keeps the source type. | Any target; query overrides cannot combine with `matches`, update overrides cannot combine with `diff`. | `#[entity(response(ty = String))]` |
 | `target(rename = "x")` | Uses Serde/source field name. | Any target. | `#[entity(create(rename = "email"))]` |
 | `query(eq)` | Equality is the default. | Query fields. | `#[entity(query(eq))]` |
@@ -640,18 +645,18 @@ provided in the sections above.
 | `clearable` / `clearable = false` | `Option<T>` uses `None` as unchanged. | `Option<T>` update; false opts out of struct `patch`. | `#[entity(clearable)]` |
 | `serde_as = "Adapter"` | No adapter. | Declared inner type; incompatible with `ty` and clearable. | `#[entity(serde_as = "DisplayFromStr")]` |
 | `validate(rule, ..)` | No rules. | Request DTOs containing the field. | `#[entity(validate(length(min = 1)))]` |
-| `target(validate(rule, ..))` | Inherits shared rules. | Create, update, delete, query; replaces shared rules for that DTO. | `#[entity(create(validate(required)))]` |
+| `target(validate(rule, ..))` | Inherits shared rules when absent. | Create, update, delete, query; replaces shared rules for that DTO and includes its target when combined with an explicit list. | `#[entity(create(validate(required)))]` |
 | `normalize(op, ..)` | No normalization. | Effective type `String`, `Option<String>`, or `Maybe<String>`. | `#[entity(normalize(trim, lowercase))]` |
 | `map(from = "field")` | Same-name source field. | Response field with struct `from(SourceType)`. | `#[entity(map(from = "email_address"))]` |
 | `map(with = "path")` | Converts with `Into`. | Response field with struct `from(SourceType)`; function accepts source value by value. | `#[entity(map(with = "mapping::clean"))]` |
 | `map(from = "field", with = "path")` | No explicit mapping. | Combines source selection and function conversion. | `#[entity(map(from = "disabled_at", with = "mapping::is_set"))]` |
 
 Here `target` means one of `response`, `create`, `update`, `delete`, or
-`query`. A target block containing only `validate(...)` changes the rules but
-does not itself include the field in that target. With no explicit field list,
-ordinary inclusion defaults still apply. With an explicit field list, combine
-the validation override with another target option such as `rename` or `ty` if
-that target must remain included.
+`query`. A validation-only block preserves ordinary inclusion defaults when
+there is no explicit field list. When a field has an explicit list, a
+validation-only block adds its target to the list, so no dummy `ty` or `rename`
+option is needed. `skip` remains an exclusion and cannot be combined with
+target inclusion.
 
 ### Struct and per-DTO options
 
@@ -710,10 +715,9 @@ operation may be listed.
   field clearable to represent deletion.
 - Query ranges, substring filters, sorting, and pagination add generated field
   names. Name collisions are compile errors.
-- When combining an explicit field target list with a target-specific
-  validation override, the target block must contain an inclusion option as
-  well (for example `rename` or `ty`). A block containing only `validate(...)`
-  does not include that target.
+- A target-specific validation block adds its target to an explicit field list.
+  Do not combine it with `skip`; use a target list containing only the DTOs
+  that should receive the field.
 - `map(...)` only applies to response fields converted from an explicitly
   configured source type. Custom functions are user code; they must accept the
   source value and return the response field type.

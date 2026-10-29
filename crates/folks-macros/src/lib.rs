@@ -59,6 +59,11 @@
 //!   `clearable` (for `update`), or the struct-level `diff` / `matches`.
 //! * `rename = "x"`: the serde name in that type only, replacing a field-level
 //!   `#[serde(rename)]`. Validation errors use it.
+//! * `validate(..)` (request types only): replaces shared validation rules for
+//!   that request type.
+//!   It includes its target when an explicit field target list is present.
+//!   Validation-only blocks preserve the default inclusion set when used
+//!   without another target selection.
 //!
 //! # `Option` policy
 //!

@@ -126,7 +126,7 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                         return Err(Error::new(
                             span,
                             format!(
-                                "`{0}()` is empty; write `{0}` or `{0}(ty = Type, rename = \"..\")`",
+                                "`{0}()` is empty; write `{0}`, `{0}(ty = Type, rename = \"..\")` or `{0}(validate(..))`",
                                 t.keyword()
                             ),
                         ));
@@ -190,8 +190,10 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                         && slot.range.is_none()
                         && slot.contains.is_none()
                     {
-                        // A validation-only target block overrides rules without
-                        // changing the field's established inclusion defaults.
+                        // With no other target selection, validation-only blocks
+                        // keep the field's established default inclusion. If an
+                        // explicit target list is present, the block is added to
+                        // that list below.
                         out.targets.retain(|(target, _)| *target != t);
                     }
                 }
@@ -282,6 +284,17 @@ pub fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
         });
         if let Err(e) = res {
             push_error(&mut errors, e);
+        }
+    }
+    // Validation-only blocks preserve the default target set when used alone,
+    // but compose with an explicit target list by including their target.
+    if !out.targets.is_empty() {
+        for target in Target::ALL {
+            if let Some((span, _)) = &out.overrides[target.index()].validate
+                && !out.targets.iter().any(|(existing, _)| *existing == target)
+            {
+                out.targets.push((target, *span));
+            }
         }
     }
     match errors {

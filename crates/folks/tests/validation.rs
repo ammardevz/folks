@@ -123,6 +123,115 @@ fn target_validation_rules_replace_shared_rules() {
 }
 
 #[derive(Entity)]
+pub struct ComposedTargets {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(
+        response,
+        create(validate(length(min = 4))),
+        update(validate(length(min = 6))),
+        query(eq, contains),
+        validate(length(min = 2)),
+        normalize(trim, lowercase)
+    )]
+    pub email: String,
+}
+
+#[test]
+fn target_validation_blocks_compose_with_explicit_inclusion() {
+    let create: ComposedTargetsCreateRequest =
+        serde_json::from_str(r#"{"email":"  FOUR "}"#).unwrap();
+    assert_eq!(create.email, "four");
+    assert!(create.validate().is_ok());
+    let short: ComposedTargetsCreateRequest = serde_json::from_str(r#"{"email":" AB "}"#).unwrap();
+    assert_eq!(names(short.validate()), ["email"]);
+
+    let update = ComposedTargetsUpdateRequest::default().with_email("  SIXSIX ");
+    assert_eq!(update.email, Some("sixsix".into()));
+    assert!(update.validate().is_ok());
+    let update = ComposedTargetsUpdateRequest::default().with_email(" FOUR ");
+    assert_eq!(names(update.validate()), ["email"]);
+
+    // Query has no target override, so it inherits the shared minimum length.
+    let query: ComposedTargetsQueryRequest =
+        serde_json::from_str(r#"{"email_contains":"  A "}"#).unwrap();
+    assert_eq!(query.email_contains.as_deref(), Some("a"));
+    assert_eq!(names(query.validate()), ["email_contains"]);
+}
+
+#[derive(Entity)]
+pub struct EffectiveTypeRules {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(
+        validate(length(min = 2)),
+        create(ty = u32, validate(range(min = 1))),
+        update(validate(length(min = 4))),
+        query(eq)
+    )]
+    pub value: String,
+}
+
+#[cfg(feature = "email")]
+#[derive(Entity)]
+pub struct OptionalEmail {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(validate(email))]
+    pub email: Option<String>,
+}
+
+#[cfg(feature = "email")]
+#[test]
+fn optional_email_is_checked_only_when_present() {
+    assert!(
+        OptionalEmailCreateRequest { email: None }
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        OptionalEmailCreateRequest {
+            email: Some("not an email".into())
+        }
+        .validate()
+        .is_err()
+    );
+    assert!(
+        OptionalEmailCreateRequest {
+            email: Some("ada@example.test".into())
+        }
+        .validate()
+        .is_ok()
+    );
+}
+
+#[test]
+fn target_override_checks_effective_type_and_shared_rules_inherit_elsewhere() {
+    assert!(
+        EffectiveTypeRulesCreateRequest { value: 1 }
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        EffectiveTypeRulesCreateRequest { value: 0 }
+            .validate()
+            .is_err()
+    );
+
+    let update = EffectiveTypeRulesUpdateRequest::default().with_value("four");
+    assert!(update.validate().is_ok());
+    let update = EffectiveTypeRulesUpdateRequest::default().with_value("x");
+    assert!(update.validate().is_err());
+
+    // Query inherits the shared `length(min = 2)` rule.
+    let query = EffectiveTypeRulesQueryRequest {
+        value: Some("x".into()),
+        ..Default::default()
+    };
+    assert!(query.validate().is_err());
+}
+
+#[derive(Entity)]
 pub struct NormalizedInput {
     #[entity(id)]
     pub id: u8,
@@ -132,8 +241,20 @@ pub struct NormalizedInput {
     pub name: String,
     #[entity(normalize(snake_case))]
     pub permission: String,
-    #[entity(clearable, normalize(trim, lowercase))]
+    #[entity(
+        clearable,
+        normalize(trim, lowercase),
+        validate(length(min = 3), custom(not_reserved))
+    )]
     pub note: Option<String>,
+}
+
+fn not_reserved(value: &str) -> Result<(), &'static str> {
+    if value == "reserved" {
+        Err("reserved value")
+    } else {
+        Ok(())
+    }
 }
 
 #[test]
@@ -147,6 +268,20 @@ fn normalized_values_keep_operation_order_and_maybe_states() {
     assert_eq!(request.permission, "read_access");
     assert_eq!(request.note, None);
     assert!(request.validate().is_ok());
+    let optional: NormalizedInputCreateRequest = serde_json::from_str(
+        r#"{"email":"ada@example.test","name":"Ada","permission":"Read","note":"  AB "}"#,
+    )
+    .unwrap();
+    assert_eq!(optional.note.as_deref(), Some("ab"));
+    assert_eq!(names(optional.validate()), ["note"]);
+    let reserved: NormalizedInputCreateRequest = serde_json::from_str(
+        r#"{"email":"ada@example.test","name":"Ada","permission":"Read","note":" reserved "}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        fields(reserved.validate()),
+        [("note".into(), "reserved value".into())]
+    );
     let direct = NormalizedInputCreateRequest {
         email: "  ADA@EXAMPLE.TEST  ".into(),
         name: "Ada Lovelace".into(),
@@ -165,6 +300,19 @@ fn normalized_values_keep_operation_order_and_maybe_states() {
     assert!(cleared.note.is_null());
     let set = NormalizedInputUpdateRequest::default().with_note("  HELLO ");
     assert_eq!(set.note, folks::Maybe::Set("hello".into()));
+    assert!(set.with_email("ada@example.test").validate().is_ok());
+    let invalid_set = NormalizedInputUpdateRequest::default()
+        .with_note("  AB ")
+        .with_email("ada@example.test");
+    assert_eq!(names(invalid_set.validate()), ["note"]);
+    let unset_with_value = NormalizedInputUpdateRequest::default().with_email("ada@example.test");
+    assert!(unset_with_value.note.is_unset());
+    assert!(unset_with_value.validate().is_ok());
+    let null_with_value = NormalizedInputUpdateRequest::default()
+        .clear_note()
+        .with_email("ada@example.test");
+    assert!(null_with_value.note.is_null());
+    assert!(null_with_value.validate().is_ok());
     let omitted: NormalizedInputUpdateRequest = serde_json::from_str("{}").unwrap();
     assert!(omitted.note.is_unset());
     let null: NormalizedInputUpdateRequest = serde_json::from_str(r#"{"note":null}"#).unwrap();
@@ -172,6 +320,10 @@ fn normalized_values_keep_operation_order_and_maybe_states() {
     let value: NormalizedInputUpdateRequest =
         serde_json::from_str(r#"{"note":"  HELLO "}"#).unwrap();
     assert_eq!(value.note, folks::Maybe::Set("hello".into()));
+    assert!(value.validate().is_ok());
+    let invalid: NormalizedInputUpdateRequest =
+        serde_json::from_str(r#"{"note":"  AB "}"#).unwrap();
+    assert_eq!(names(invalid.validate()), ["note"]);
 }
 
 fn good() -> EverythingCreateRequest {

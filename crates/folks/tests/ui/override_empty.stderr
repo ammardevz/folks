@@ -4,7 +4,7 @@ error: `User::name`: this field's configuration is invalid; correct or remove th
 8 |     name: String,
   |     ^^^^
 
-error: `create()` is empty; write `create` or `create(ty = Type, rename = "..")`
+error: `create()` is empty; write `create`, `create(ty = Type, rename = "..")` or `create(validate(..))`
  --> tests/ui/override_empty.rs:7:14
   |
 7 |     #[entity(create())]

@@ -5,8 +5,10 @@ struct Model {
     disabled_at: Option<u64>,
 }
 
-fn is_set(value: String) -> bool {
-    !value.is_empty()
+struct Incompatible;
+
+fn is_set(_value: Incompatible) -> bool {
+    true
 }
 
 #[derive(Entity)]
