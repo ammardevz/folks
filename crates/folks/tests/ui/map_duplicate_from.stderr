@@ -1,0 +1,11 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+  --> tests/ui/map_duplicate_from.rs:15:5
+   |
+15 |     name: String,
+   |     ^^^^
+
+error: duplicate `map(from = ..)`
+  --> tests/ui/map_duplicate_from.rs:14:39
+   |
+14 |     #[entity(map(from = "first_name", from = "second_name"))]
+   |                                       ^^^^

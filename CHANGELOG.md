@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.2
+
+### Fixed
+
+- Corrected validation override type-checking and rejected ineffective or
+  conflicting source-field mappings.
+- Kept generic parameter handling compatible with the workspace's syn version.
+
+This is a backward-compatible patch release.
+
 ## 0.2.1
 
 ### Added

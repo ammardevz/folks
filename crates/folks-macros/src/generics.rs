@@ -91,11 +91,9 @@ fn strip_defaults(p: &GenericParam) -> GenericParam {
     let mut p = p.clone();
     match &mut p {
         GenericParam::Type(t) => {
-            t.eq_token = None;
             t.default = None;
         }
         GenericParam::Const(c) => {
-            c.eq_token = None;
             c.default = None;
         }
         GenericParam::Lifetime(_) => {}

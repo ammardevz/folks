@@ -1,0 +1,11 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+ --> tests/ui/target_validate_rule_mismatch.rs:8:5
+  |
+8 |     name: String,
+  |     ^^^^
+
+error: `length` cannot be applied to `u32`: it needs text or a collection (String, &str, Vec<_>, ...)
+ --> tests/ui/target_validate_rule_mismatch.rs:7:40
+  |
+7 |     #[entity(create(ty = u32, validate(length(min = 1))))]
+  |                                        ^^^^^^
