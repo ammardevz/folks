@@ -703,6 +703,15 @@ impl Field {
         let targets = resolve_targets(&attrs, entity, ident)?;
         let serde = attrs::parse_field_serde(&f.attrs);
 
+        if (attrs.map_from.is_some() || attrs.map_with.is_some())
+            && !targets.contains(Target::Response)
+        {
+            return Err(Error::new(
+                ident.span(),
+                "`map(..)` requires this field to be included in the response DTO",
+            ));
+        }
+
         if let Some((span, _)) = &attrs.default
             && !targets.contains(Target::Create)
         {
@@ -776,7 +785,32 @@ impl Field {
         let rules = match attrs.validate {
             None => Vec::new(),
             Some((span, rules)) => {
-                check_rules(&rules, f, &attrs.overrides, targets, span)?;
+                const REQUESTS: [Target; 4] = [
+                    Target::Create,
+                    Target::Update,
+                    Target::Delete,
+                    Target::Query,
+                ];
+                let has_request_target = REQUESTS.iter().any(|target| targets.contains(*target));
+                let shared_targets = REQUESTS
+                    .into_iter()
+                    .filter(|target| {
+                        targets.contains(*target)
+                            && attrs.overrides[target.index()].validate.is_none()
+                    })
+                    .fold(TargetSet::default(), TargetSet::with);
+                if has_request_target {
+                    if REQUESTS
+                        .iter()
+                        .any(|target| shared_targets.contains(*target))
+                    {
+                        check_rules(&rules, f, &attrs.overrides, shared_targets, span)?;
+                    }
+                } else {
+                    // Preserve the existing diagnostic for validation on fields
+                    // that appear only in responses or no request DTO.
+                    check_rules(&rules, f, &attrs.overrides, targets, span)?;
+                }
                 rules
             }
         };

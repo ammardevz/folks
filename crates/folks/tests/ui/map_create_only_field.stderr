@@ -1,0 +1,11 @@
+error: `User::name`: this field's configuration is invalid; correct or remove the option shown below
+  --> tests/ui/map_create_only_field.rs:14:5
+   |
+14 |     name: String,
+   |     ^^^^
+
+error: `map(..)` requires this field to be included in the response DTO
+  --> tests/ui/map_create_only_field.rs:14:5
+   |
+14 |     name: String,
+   |     ^^^^

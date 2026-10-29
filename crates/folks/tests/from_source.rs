@@ -24,11 +24,16 @@ struct LegacyUser {
 struct MappedModel {
     id: u64,
     email_address: String,
+    name: String,
     disabled_at: Option<u64>,
 }
 
 fn is_disabled(value: Option<u64>) -> bool {
     value.is_some()
+}
+
+fn normalize_name(value: String) -> String {
+    value.trim().to_owned()
 }
 
 #[derive(Entity)]
@@ -38,18 +43,22 @@ struct MappedUser {
     id: u64,
     #[entity(map(from = "email_address"))]
     email: String,
+    #[entity(map(with = "normalize_name"))]
+    name: String,
     #[entity(map(from = "disabled_at", with = "is_disabled"))]
     disabled: bool,
 }
 
 #[test]
-fn source_fields_can_be_mapped_by_name_and_function() {
+fn source_fields_support_renaming_conversion_and_combined_mapping() {
     let response = MappedUserResponse::from(MappedModel {
         id: 5,
         email_address: "a@example.test".into(),
+        name: "  Ada  ".into(),
         disabled_at: Some(10),
     });
     assert_eq!(response.email, "a@example.test");
+    assert_eq!(response.name, "Ada");
     assert!(response.disabled);
 }
 

@@ -4,7 +4,7 @@ error: `User::name`: this field's configuration is invalid; correct or remove th
 8 |     name: String,
   |     ^^^^
 
-error: unknown `entity` field option; expected one of: id, skip, readonly, immutable, secret, sortable, response, create, update, delete, query (each also as `create(ty = Type, rename = "..")`; `query(eq, range, contains)`), default, default = "..", clearable, clearable = false, serde_as = "..", validate(..)
+error: unknown `entity` field option; expected one of: id, skip, readonly, immutable, secret, sortable, response, create, update, delete, query (each also as `create(ty = Type, rename = "..", validate(..))`; `query(eq, range, contains)`), default, default = "..", clearable, clearable = false, serde_as = "..", validate(..), normalize(..), map(..)
  --> tests/ui/unknown_field_option.rs:7:14
   |
 7 |     #[entity(frobnicate)]

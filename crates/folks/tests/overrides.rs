@@ -161,3 +161,61 @@ fn field_is_only_in_the_listed_types() {
         visits: None,
     };
 }
+
+#[derive(Entity)]
+pub struct ValidationOverrideTypeCheck {
+    #[entity(id)]
+    pub id: u8,
+    #[entity(
+        response,
+        create(ty = u32, validate(range(min = 4))),
+        update,
+        query,
+        validate(length(min = 3))
+    )]
+    pub value: String,
+}
+
+#[test]
+fn validation_override_skips_shared_type_check_only_for_its_target() {
+    assert!(
+        ValidationOverrideTypeCheckCreateRequest { value: 4 }
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        ValidationOverrideTypeCheckCreateRequest { value: 3 }
+            .validate()
+            .is_err()
+    );
+
+    assert!(
+        ValidationOverrideTypeCheckUpdateRequest::default()
+            .with_value("abc")
+            .validate()
+            .is_ok()
+    );
+    assert!(
+        ValidationOverrideTypeCheckUpdateRequest::default()
+            .with_value("ab")
+            .validate()
+            .is_err()
+    );
+
+    assert!(
+        ValidationOverrideTypeCheckQueryRequest {
+            value: Some("abc".into()),
+            ..Default::default()
+        }
+        .validate()
+        .is_ok()
+    );
+    assert!(
+        ValidationOverrideTypeCheckQueryRequest {
+            value: Some("a".into()),
+            ..Default::default()
+        }
+        .validate()
+        .is_err()
+    );
+}
