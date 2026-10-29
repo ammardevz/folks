@@ -28,7 +28,7 @@ struct MappedModel {
     disabled_at: Option<u64>,
 }
 
-fn is_disabled(value: Option<u64>) -> bool {
+fn is_set<T>(value: Option<T>) -> bool {
     value.is_some()
 }
 
@@ -45,7 +45,7 @@ struct MappedUser {
     email: String,
     #[entity(map(with = "normalize_name"))]
     name: String,
-    #[entity(map(from = "disabled_at", with = "is_disabled"))]
+    #[entity(map(from = "disabled_at", with = "is_set"))]
     disabled: bool,
 }
 
@@ -60,6 +60,14 @@ fn source_fields_support_renaming_conversion_and_combined_mapping() {
     assert_eq!(response.email, "a@example.test");
     assert_eq!(response.name, "Ada");
     assert!(response.disabled);
+
+    let response = MappedUserResponse::from(MappedModel {
+        id: 6,
+        email_address: "b@example.test".into(),
+        name: "Grace".into(),
+        disabled_at: None,
+    });
+    assert!(!response.disabled);
 }
 
 #[derive(Entity)]

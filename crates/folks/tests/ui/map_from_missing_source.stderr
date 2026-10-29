@@ -1,0 +1,7 @@
+error[E0609]: no field `disabled_at` on type `Model`
+  --> tests/ui/map_from_missing_source.rs:17:5
+   |
+17 |     disabled: bool,
+   |     ^^^^^^^^ unknown field
+   |
+   = note: available field is: `id`

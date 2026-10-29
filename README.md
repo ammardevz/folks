@@ -631,13 +631,16 @@ struct User {
     id: u64,
     #[entity(map(from = "email_address"))]
     email: String,
-    #[entity(map(from = "disabled_at", with = "crate::mapping::is_disabled"))]
+    #[entity(map(from = "disabled_at", with = "crate::mapping::is_set"))]
     disabled: bool,
 }
 ```
 
 The conversion function takes the selected source field by value and returns
-the response field type. Mapping applies only to `From<Source> for Response`.
+the response field type. For example, `fn is_set<T>(value: Option<T>) -> bool`
+can return `value.is_some()` to expose an optional timestamp as a response
+boolean. `folks` does not infer timestamp relationships or generate state
+updates. Mapping applies only to `From<Source> for Response`.
 
 #### Normalizing request fields
 
