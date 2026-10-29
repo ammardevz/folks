@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.1
+
+### Added
+
+- Added ordered request-field normalization, per-request validation overrides,
+  and explicit source-field mappings for response conversions.
+- Added the `convert_case` runtime dependency for established case conversion.
+- Expanded the README quick start and attribute reference.
+
+This is a backward-compatible patch release; no breaking changes are included.
+
 ## 0.2.0
 
 ### Breaking changes
