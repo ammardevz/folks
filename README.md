@@ -3,179 +3,67 @@
 [![Rust](https://img.shields.io/badge/rust-1.91.1%2B-orange.svg)](https://www.rust-lang.org)
 [![Edition](https://img.shields.io/badge/edition-2024-blue.svg)](https://doc.rust-lang.org/edition-guide/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](#license)
-[![Workspace](https://img.shields.io/badge/cargo-workspace-lightgrey.svg)](https://doc.rust-lang.org/cargo/reference/workspaces.html)
 
-A Rust library that turns one entity definition into a complete, consistent set
-of request and response types, with serialization, validation, partial updates
-and pagination included.
+`folks` derives request and response data transfer objects (DTOs) from a
+named-field Rust entity. The derive generates the DTO types, Serde and Garde
+implementations, and optional helpers for updates, filtering, diffs, sorting,
+and pagination.
 
-## Table of Contents
+Use `#[derive(Entity)]` or its `#[derive(Dto)]` alias. Both derive macros are
+re-exported at the `folks` crate root.
 
-- [About](#about)
-- [Features](#features)
-- [Project Structure](#project-structure)
-- [Installation and Setup](#installation-and-setup)
-- [Quick Start](#quick-start)
-- [Usage](#usage)
-    - [Generated Types](#generated-types)
-    - [Field Inclusion](#field-inclusion)
-    - [Optional Fields and Nullable Updates](#optional-fields-and-nullable-updates)
-    - [Builders and Conversions](#builders-and-conversions)
-    - [Patch, Diff and Filter](#patch-diff-and-filter)
-    - [Richer Query Requests](#richer-query-requests)
-    - [Field Normalization](#field-normalization)
-    - [Validation](#validation)
-    - [Serialization](#serialization)
-    - [Attribute Reference](#attribute-reference)
-    - [Pagination](#pagination)
-    - [Integrations](#integrations)
-- [Cargo Features](#cargo-features)
-- [Development](#development)
-- [Design Notes and Limitations](#design-notes-and-limitations)
-- [Contributing](#contributing)
+`folks` does not provide database access or HTTP routing. Application code
+remains responsible for persistence and business rules. The derive keeps the
+Rust types at those boundaries aligned with the entity definition.
+
+The minimum supported Rust version is **1.91.1**. The workspace uses Rust
+edition 2024.
+
+## Contents
+
+- [Installation](#installation)
+- [Quick start](#quick-start)
+- [Generated DTOs](#generated-dtos)
+- [Field attributes](#field-attributes)
+- [Struct and DTO configuration](#struct-and-dto-configuration)
+- [Validation](#validation)
+- [Normalization](#normalization)
+- [Field mapping and conversions](#field-mapping-and-conversions)
+- [Updates and `Maybe<T>`](#updates-and-maybet)
+- [Queries, sorting, and pagination](#queries-sorting-and-pagination)
+- [Patching, diffs, and in-memory filtering](#patching-diffs-and-in-memory-filtering)
+- [Cargo features](#cargo-features)
+- [Complete attribute reference](#complete-attribute-reference)
+- [Limitations and common mistakes](#limitations-and-common-mistakes)
+- [Examples and tests](#examples-and-tests)
 - [License](#license)
 
-## About
+## Installation
 
-The minimum supported Rust version is 1.91.1.
-
-Layered services usually need the same shape described several times: a stored
-entity, a response DTO, a create request, a partial-update request, a delete
-request and a query filter. Keeping those in sync by hand is repetitive and
-error prone.
-
-`folks` provides `#[derive(Entity)]` and its alias `#[derive(Dto)]`. Both use
-the same `#[entity(..)]` options. `Dto` is useful when a local ORM already uses
-`Entity` as a type name. From one struct with one field marked `#[entity(id)]`,
-either derive generates all five types and implements
-`folks::core::entity::Entity` for the struct. The generated types
-derive `Debug`, `Clone`, `Serialize` and `Deserialize`, and the request types
-implement `garde::Validate`, so they work with `axum-valid`, `actix-web-garde`
-and every other garde integration.
-
-Every behaviour has a default. Configuration is opt-in and layered: shared
-options apply to all generated types, and per-type blocks override only what
-differs.
-
-## Features
-
-- **Five generated types per entity**: response, create, update, delete and
-  query, wired to the `Entity` trait's associated types.
-- **Predictable field rules**: sensible defaults for which field appears where,
-  with `skip`, `readonly`, `immutable` and explicit lists to override.
-- **Correct `Option` handling**: update and query fields are never
-  `Option<Option<T>>`. Nullable updates use the explicit three-state
-  `Maybe<T>` (unset, null, value), which matches JSON merge-patch semantics.
-- **Typed validation**: a small rule language (`length`, `range`, `email`,
-  `each`, `custom` and more) checked against field types at compile time, with
-  structured per-field errors.
-- **Serde and serde_with support**: no direct `serde` dependency needed in
-  consuming crates; field-level `serde_as` adapters are propagated correctly.
-- **Ergonomic builders**: `new(..)`, `with_*`, `with_*_opt`, `clear_*` and
-  `with_*_nullable` setters, `Default` for update and query types, and
-  `From<Entity>` for the response.
-- **Patch, Diff and Filter traits**: apply an update to an entity, compute an
-  update from two entities, and match an entity against a query in memory.
-- **Pagination types**: `PageRequest` and `Page<T>` with clamping and mapping.
-- **Richer query requests**: opt-in inclusive ranges, substring matching,
-  generated sort fields and integrated pagination parameters.
-- **Optional integrations** behind Cargo features: `schemars`, `utoipa`, and
-  the `email`, `url` and `pattern` validation rules.
-- **Generics, lifetimes and renamed dependencies** are supported. Generated
-  code is lint-clean, including for private entities.
-
-## Project Structure
-
-```text
-.
-├── Cargo.toml                  Workspace manifest
-├── Cargo.lock
-├── README.md
-├── crates
-│   ├── folks                   Runtime crate and public API
-│   │   ├── Cargo.toml
-│   │   ├── src
-│   │   │   ├── lib.rs          Re-exports, prelude
-│   │   │   └── core
-│   │   │       ├── entity.rs   Entity trait
-│   │   │       ├── error.rs    Error and FieldError
-│   │   │       ├── filter.rs   Filter trait
-│   │   │       ├── maybe.rs    Maybe<T> (unset / null / value)
-│   │   │       ├── page.rs     Page and PageRequest
-│   │   │       ├── patch.rs    Patch and Diff traits
-│   │   │       └── mod.rs
-│   │   └── tests               Integration tests and compile-fail suites
-│   │       ├── entity.rs, features.rs, flex.rs, syntax.rs, comfort.rs,
-│   │       │   validation.rs, integrations.rs
-│   │       ├── compile.rs      trybuild driver
-│   │       ├── ui/             Compile-fail cases (.rs + expected .stderr)
-│   │       ├── ui_email/       Cases that apply when the email feature is off
-│   │       └── ui_features/    Cases that apply when schemars is off
-│   ├── folks-macros            The #[derive(Entity)] procedural macro
-│   │   ├── Cargo.toml
-│   │   └── src
-│   │       ├── lib.rs          Entry point and macro documentation
-│   │       ├── attrs.rs        Attribute parsing
-│   │       ├── model.rs        Validated entity model and inclusion rules
-│   │       ├── codegen.rs      Code generation
-│   │       ├── rules.rs        Typed validation rule language
-│   │       ├── generics.rs     Per-type generic parameter selection
-│   │       └── types.rs        Syntactic type helpers
-│   └── folks-consumer          Test-only crate
-│       ├── Cargo.toml          Uses folks under a renamed dependency
-│       ├── src/lib.rs          Built with deny(warnings, missing_docs)
-│       └── tests/renamed.rs
-```
-
-| Crate            | Purpose                                                                                                                                    |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `folks`          | The crate applications depend on. Defines the traits and runtime types and re-exports the derive macro.                                    |
-| `folks-macros`   | The procedural macro. Not used directly; it is re-exported by `folks`.                                                                     |
-| `folks-consumer` | Not published. Verifies that the macro works through a renamed dependency and that generated code produces no warnings under strict lints. |
-
-## Installation and Setup
-
-### Prerequisites
-
-- Rust 1.91.1 or newer (the workspace uses edition 2024).
-- Cargo, installed with the Rust toolchain.
-
-### Using folks in a project
-
-Add the dependency to the `Cargo.toml` of your project:
+Add `folks` as a Git dependency:
 
 ```toml
 [dependencies]
 folks = { git = "https://github.com/ammardevz/folks" }
 ```
 
-Enable optional integrations through Cargo features (see
-[Cargo Features](#cargo-features)):
+The default feature set is empty. To use optional integrations, enable the
+features your application needs:
 
 ```toml
 [dependencies]
 folks = { git = "https://github.com/ammardevz/folks", features = ["email", "schemars"] }
 ```
 
-No direct dependency on `serde` or `serde_with` is required. The generated code
-refers to them through `folks`.
+The derive macro is re-exported by `folks`; applications do not need a direct
+dependency on `folks-macros`. Generated paths use the `serde`, `serde_with`,
+and `garde` re-exports, so those crates need not be direct dependencies unless
+application code uses them independently.
 
-### Building from source
+## Quick start
 
-```bash
-git clone https://github.com/ammardevz/folks.git
-cd folks
-cargo build --workspace
-cargo test --workspace
-```
-
-To exercise the optional integrations as well:
-
-```bash
-cargo test --workspace --all-features
-```
-
-## Quick Start
+This example defines an entity, validates a create request, applies a nullable
+update, and converts the entity to a response DTO:
 
 ```rust
 use folks::prelude::*;
@@ -186,444 +74,408 @@ struct User {
     id: u64,
     #[entity(validate(length(min = 1, max = 80)))]
     name: String,
+    #[entity(clearable)]
     bio: Option<String>,
 }
 
-fn create_user() -> Result<(), folks::Error> {
+fn handle_create() -> Result<UserResponse, folks::Error> {
     let request = UserCreateRequest::new("Amina").with_bio("Engineer");
     request.validate()?;
-    Ok(())
+
+    let mut user = User {
+        id: 1,
+        name: request.name,
+        bio: request.bio,
+    };
+    UserUpdateRequest::default()
+        .clear_bio()
+        .apply_to(&mut user);
+
+    Ok(UserResponse::from(user))
 }
 ```
 
-This one definition generates `UserResponse`, `UserCreateRequest`,
-`UserUpdateRequest`, `UserDeleteRequest` and `UserQueryRequest`. The sections
-below show how to customize which fields appear and how each DTO behaves.
+The derive creates `UserResponse`, `UserCreateRequest`, `UserUpdateRequest`,
+`UserDeleteRequest`, and `UserQueryRequest`. The prelude imports the derive
+and trait named `Entity`, common runtime traits and types, and
+`garde::Validate`. `folks::Error` converts a Garde report, allowing `?` as
+shown above. `Error` and `FieldError` are also available from the crate root.
 
-## Usage
+## Generated DTOs
 
-### Generated Types
+For an entity named `User`, the derive generates these types by default:
 
-For an entity named `User`, the derive generates the following types. The names
-follow the entity name and apply to multi-word names as well
-(`BlogPost` produces `BlogPostResponse`, and so on).
+| Type | Purpose | Default fields |
+| --- | --- | --- |
+| `UserResponse` | Return entity data | Identifier and ordinary fields |
+| `UserCreateRequest` | Accept create input | Ordinary fields except the identifier |
+| `UserUpdateRequest` | Accept partial updates | Updatable fields, made optional |
+| `UserDeleteRequest` | Identify an entity to delete | Identifier only |
+| `UserQueryRequest` | Filter a collection | Ordinary fields, made optional |
 
-| Type                | Purpose                  | Contents                                                |
-| ------------------- | ------------------------ | ------------------------------------------------------- |
-| `UserResponse`      | Data returned to clients | `id` and the ordinary fields                            |
-| `UserCreateRequest` | Creating an entity       | Ordinary fields, without the id                         |
-| `UserUpdateRequest` | Partial update           | Updatable fields, all optional                          |
-| `UserDeleteRequest` | Deleting an entity       | The id                                                  |
-| `UserQueryRequest`  | Filtering                | Optional equality, range and substring filters, plus opted-in sort/page fields |
+Multi-word names retain their casing: `BlogPostResponse`,
+`BlogPostCreateRequest`, and so on. Struct-level `name = "Prefix"` changes the
+prefix used for default names; a per-DTO `name = "Type"` sets that DTO's full
+name.
 
-`folks::core::entity::Entity` is implemented for `User` with:
+The entity implements `folks::Entity` with associated types for its id,
+response, and four request DTOs. Every request DTO implements
+`folks::garde::Validate<Context = ()>`. Responses are not validated.
 
-| Associated type       | Value                                        |
-| --------------------- | -------------------------------------------- |
-| `EntityId`            | The type of the field marked `#[entity(id)]` |
-| `EntityResponse`      | `UserResponse`                               |
-| `EntityCreateRequest` | `UserCreateRequest`                          |
-| `EntityUpdateRequest` | `UserUpdateRequest`                          |
-| `EntityDeleteRequest` | `UserDeleteRequest`                          |
-| `EntityQueryRequest`  | `UserQueryRequest`                           |
+Generated DTOs derive `Debug`, `Clone`, `Serialize`, and `Deserialize` unless a
+secret requires a redacting `Debug` implementation. Additional derives can be
+configured. Generated fields are public.
 
-Exactly one field must carry `#[entity(id)]`. A missing or duplicated id is a
-compile error. Responses are not validated; only the four request types
-implement `garde::Validate` (`folks::garde::Validate`, also in the prelude).
+### Default field inclusion
 
-### Field Inclusion
+| Source field | Response | Create | Update | Delete | Query |
+| --- | :---: | :---: | :---: | :---: | :---: |
+| Ordinary field | yes | yes | yes | no | yes |
+| `#[entity(id)]` | yes | no | no | yes | yes |
 
-| Field           | response | create | update | delete | query |
-| --------------- | :------: | :----: | :----: | :----: | :---: |
-| Ordinary field  |   yes    |  yes   |  yes   |   no   |  yes  |
-| `#[entity(id)]` |   yes    |   no   |   no   |  yes   |  yes  |
+An entity must have exactly one id. An explicit target list replaces the
+ordinary field defaults. The id may be included in `response` or `query`, but
+cannot be added to `create` or `update`; it remains in delete requests.
 
-Field attributes adjust the defaults:
+### Generated builders and conversions
 
-| Attribute                                         | Effect                                                |
-| ------------------------------------------------- | ----------------------------------------------------- |
-| `skip`                                            | Excluded from every generated type                    |
-| `readonly`                                        | Response and query only (for example `created_at`)    |
-| `immutable`                                       | Response, create and query; never updated             |
-| `secret`                                          | Create and update only; redacted (`***`) in `Debug`   |
-| `response`, `create`, `update`, `delete`, `query` | A list: the field appears in exactly the listed types |
+Create, update, and query DTOs have fluent setters by default. The generated
+create `new(...)` takes every non-`Option` create field; declared `Option`
+fields start as `None`. Update and query DTOs implement `Default` with all
+fields unset.
 
-The id can never be placed in create or update requests, and it is always part
-of the delete request. Conflicting combinations, such as `skip` with a list, are
-reported as compile errors at the relevant attribute.
+| Generated API | DTO | Behavior |
+| --- | --- | --- |
+| `TypeCreateRequest::new(required, ..)` | Create | Constructs from required fields, accepting `impl Into<T>`. |
+| `.with_field(value)` | Create, update, query | Sets the field from a value implementing `Into<T>`. |
+| `.with_field_opt(option)` | Optional fields | Sets on `Some`; `None` leaves the current value unchanged. |
+| `.clear_field()` | Clearable update fields | Sets the field to `Maybe::Null`. |
+| `.with_field_nullable(option)` | Clearable update fields | `Some` sets the value; `None` clears it. |
+| `.is_empty()` | Request DTOs | True when no required field is present and all optional fields are unset. An empty update fails validation. |
+| `From<Entity> for EntityResponse` | Entity | Moves response fields from the entity. Enabled by default. |
 
-#### Per-type overrides
+Because `_opt` setters accept `Option<impl Into<T>>`, specify the inner type
+when passing an untyped `None`, for example `.with_name_opt(None::<String>)`.
+Use `no(new)`, `no(setters)`, `no(default)`, or `no(from)` to disable the
+corresponding helper where it applies.
 
-The API shape does not have to equal the stored shape. Each list flag accepts
-options:
+### Serde attributes
 
-```rust,ignore
-pub struct Email(String);                 // From<String> and Into<String> exist
+Generated DTOs derive `Serialize` and `Deserialize`. Source struct-level
+`#[serde(rename_all = "...")]` is copied unless entity configuration provides
+another `rename_all`. Field-level `rename` and `alias` are copied to DTOs
+containing the field. Type-specific field keys `default`, `with`,
+`serialize_with`, `deserialize_with`, and `skip_serializing_if` are copied
+only to response, create, and delete DTOs, where the field keeps its declared
+type. Update and query fields receive their own optional Serde behavior. Other
+field Serde keys are not propagated by the macro. `serde_as` is supported
+separately through `serde_with`.
 
-#[entity(
-    response(ty = String, rename = "emailAddress"),
-    create(ty = String),
-    update(ty = String),
-    validate(length(min = 3)),            // checked against `String`
-)]
-pub email: Email,
-```
+## Field attributes
 
-- `ty = Type` changes the field's type in that generated type only. The flag
-  still means "include the field"; the bare flag keeps working.
-- `rename = "x"` changes the serde name in that type only (and the name used in
-  validation errors).
-- `From<Entity> for Response` converts with `Into` (an `Option<A>` to
-  `Option<B>` converts the inner value); `apply_to` converts update values back.
-  If no conversion exists, the error points at the `ty` and says which `From`
-  is missing.
-- Validation rules are checked and run against the overridden type.
-- Not combinable with `serde_as`, with `clearable` on `update(ty = ..)`, or
-  with the struct-level `diff` (`update`) / `matches` (`query`).
-- Serde keys written for the declared type (`with`, `default = ..`) are not
-  copied to a retyped field. `#[entity(default = "path")]` is, so the function
-  must return the create type.
+Field attributes are written on an entity field and can be split across
+multiple `#[entity(...)]` attributes. Their effects apply only to DTOs that
+contain the field.
 
-#### Secrets
+### Inclusion and field behavior
 
-Generated types derive `Debug`, which would print a password into your logs.
-Mark credentials with `#[entity(secret)]`:
+| Attribute | Purpose and behavior | Default / restriction |
+| --- | --- | --- |
+| `id` | Marks the entity identifier. | Required exactly once; included in response, delete, and query. |
+| `skip` | Omits the field from all DTOs. | Conflicts with target lists, `readonly`, and `immutable`; cannot be used on the id. |
+| `readonly` | Includes a server-owned field in response and query. | Conflicts with `immutable`, target lists other than `query`, and the id. |
+| `immutable` | Includes a field in response, create, and query, but not update. | Conflicts with `readonly`, target lists other than `query`, and the id. |
+| `secret` | Accepts a secret in input, omits it from response/query, redacts it in generated DTO `Debug`. | Bare `secret` means create and update. Cannot be used on id, `readonly`, `immutable`, `skip`, or `sortable` fields. |
+| `response` | Includes the field only in response. | An explicit target list replaces defaults. |
+| `create` | Includes the field only in create. | Cannot include the id. |
+| `update` | Includes the field only in update. | Cannot include the id. |
+| `delete` | Includes the field only in delete. | The id is always included in delete. |
+| `query` | Includes the field only in query. | The id is always included in query. |
+| `sortable` | Adds the field to the generated sort enum. | Cannot be used on skipped or secret fields. The field does not need to be a query filter. |
+| `default` | Uses the field type's `Default` value when create input omits the field. | Create fields only. |
+| `default = "path"` | Calls a function for a missing create field. | Function returns the generated create field type. |
+| `clearable` | Makes an `Option<T>` update field a `Maybe<T>`, allowing explicit null to clear it. | `Option<T>` update fields only; incompatible with `serde_as` and update type overrides. |
+| `clearable = false` | Opts the field out of struct-level `patch`. | Only useful with `#[entity(patch)]`. |
+| `serde_as = "Adapter"` | Applies a `serde_with` adapter to the field's inner type. | Incompatible with type overrides and clearable fields. |
 
-```rust,ignore
-#[entity(secret)]
-pub password: String,                 // create + update only
-#[entity(secret, create)]
-pub api_key: Option<String>,          // create only
-```
+An explicit list such as `#[entity(response, create)]` includes a field in
+exactly those DTOs. See [per-DTO field overrides](#per-dto-field-overrides).
+A validation-only block such as `create(validate(...))` changes the rules but
+retains the field's default inclusion when no explicit target list is present.
+With a target list, include every DTO that should contain the field.
 
-Every generated type that contains a secret gets a hand-written `Debug` that
-prints `***` for it, so `{:?}` and `tracing` output never contain the value.
-Types without secrets keep the derived `Debug`. A secret is still serialized
-and deserialized normally. `secret` is a compile error on the id, on a field
-listed in `response` or `query`, and together with `readonly`, `immutable` or
-`skip`.
+### Per-DTO field overrides
 
-Note: `Debug` of your own entity struct is yours; derive or implement it
-yourself with the same care.
-
-### Optional Fields and Nullable Updates
-
-- Response, create and delete fields keep the declared type.
-- Update and query fields are `Option<T>`. A field already declared
-  `Option<T>` stays `Option<T>`; it is never wrapped twice.
-- By default, `None` in an update means "not supplied", so a nullable field
-  cannot be set to null.
-
-To allow setting a nullable field to null, mark it `#[entity(clearable)]`, or
-enable `patch` on the struct to apply this to every `Option<T>` field. The
-update field then becomes `folks::Maybe<T>`:
-
-| JSON           | `Maybe<T>`   | Meaning                   |
-| -------------- | ------------ | ------------------------- |
-| key omitted    | `Unset`      | Leave the field unchanged |
-| `"key": null`  | `Null`       | Clear the field           |
-| `"key": value` | `Set(value)` | Replace the field         |
-
-`#[entity(clearable = false)]` opts a field out of `patch` mode. Clearable fields
-cannot be combined with `serde_as`.
-
-### Builders and Conversions
-
-| Generated item                | On                      | Description                                                    |
-| ----------------------------- | ----------------------- | -------------------------------------------------------------- |
-| `new(required..)`             | create                  | Required fields as `impl Into<T>`; optional fields start unset |
-| `with_x(v)`                   | create, update, query   | Sets a field from any `Into<T>`                                |
-| `with_x_opt(Option<_>)`       | optional fields         | Sets when `Some`; leaves the field untouched on `None`         |
-| `clear_x()`                   | clearable update fields | Sets the field to null                                         |
-| `with_x_nullable(Option<_>)`  | clearable update fields | `Some` sets; `None` clears                                     |
-| `Default`                     | update, query           | Nothing set; no bounds on generic parameters                   |
-| `From<User> for UserResponse` | entity                  | Moves the response fields out of the entity                    |
-| `From<Model> for UserResponse` | each `from(Model)`      | Converts same-named response fields with `Into::into`          |
-
-The entity conversion can be disabled with `#[entity(no(from))]`, for example
-to provide a hand-written `From` implementation. Explicit model conversions
-are independent of that helper:
+The `response`, `create`, `update`, `delete`, and `query` field blocks accept
+`ty = Type`, `rename = "wireName"`, and `validate(...)`. Each block includes
+the field unless it contains only `validate(...)`.
 
 ```rust
+use folks::Entity;
+
+struct Email(String);
+
+impl From<Email> for String {
+    fn from(value: Email) -> Self {
+        value.0
+    }
+}
+
+impl From<String> for Email {
+    fn from(value: String) -> Self {
+        Email(value)
+    }
+}
+
 #[derive(Entity)]
-#[entity(from(crate::database::UserModel), from(crate::legacy::User))]
+struct Contact {
+    #[entity(id)]
+    id: u64,
+    #[entity(
+        response(ty = String, rename = "emailAddress"),
+        create(ty = String),
+        update(ty = String),
+    )]
+    email: Email,
+}
+```
+
+`ty` changes the generated field type in that DTO. Entity-to-response
+conversion uses `Into`; patching an update converts the request value back to
+the entity field type. When both sides are `Option`, the inner value is
+converted. A missing conversion is a compiler error. `rename` changes that
+DTO's Serde field name and validation error path. The `query(...)` block also
+accepts filter modes described in
+[Queries, sorting, and pagination](#queries-sorting-and-pagination).
+
+Type overrides cannot be combined with `serde_as`. `update(ty = ..)` cannot be
+combined with a clearable field. An update type override cannot be used with
+`diff`, and a query type override cannot be used with `matches`, because those
+helpers compare request fields with entity fields. Field-level Serde
+attributes for the declared type are not copied to retyped fields.
+
+## Struct and DTO configuration
+
+Struct options go in `#[entity(...)]` on the entity and may be split across
+several attributes. Shared options apply across generated DTOs; per-DTO blocks
+add to or override those settings.
+
+```rust
+use folks::Entity;
+
+#[derive(Entity)]
+#[entity(
+    rename_all = "camelCase",
+    strict,
+    derive(PartialEq),
+    response(name = "UserDto", derive(Eq)),
+    create(name = "NewUser"),
+    query(paginate),
+    patch,
+)]
 struct User {
     #[entity(id)]
     id: u64,
     name: String,
-    nickname: Option<String>,
 }
 ```
 
-Each `from(..)` generates `From<Source> for UserResponse`, mapping fields by
-their Rust names and converting each value with `Into::into`. Optional response
-fields map `Option<A>` to `Option<B>` with `Option::map`. A missing source
-field or a missing conversion is reported by rustc at the corresponding entity
-field. Multiple source types are supported.
+### Shared struct options
 
-### Patch, Diff and Filter
+| Option | Purpose | Default / behavior |
+| --- | --- | --- |
+| `name = "Prefix"` | Sets the prefix for default generated names. | Entity's Rust name. |
+| `vis = "pub(crate)"` | Sets generated DTO and sort enum visibility. | Entity visibility; may widen but not narrow below entity visibility. |
+| `derive(Path, ..)` | Adds derives to generated DTOs. | None; shared and per-DTO lists accumulate. |
+| `serde(meta, ..)` | Adds container Serde metadata. | None; `crate` is reserved. |
+| `rename_all = "case"` | Sets generated DTO field naming. | Uses source `#[serde(rename_all = ...)]` unless entity configuration sets it. Use one entity setting per DTO. |
+| `strict` / `strict = false` | Controls `deny_unknown_fields`. | Disabled; shared `strict` applies to requests, not response. Per-DTO setting overrides it. |
+| `patch` | Makes eligible `Option<T>` update fields clearable. | Disabled; `clearable = false` opts a field out. `serde_as` fields are not implicitly made clearable. |
+| `diff` | Generates `Diff<Entity>` for update requests. | Disabled; included fields need `Clone + PartialEq`. |
+| `matches` | Generates `Filter<Entity>` for query requests. | Disabled; comparison fields need the relevant traits. |
+| `schemars` | Derives `JsonSchema` for DTOs and sort enum. | Requires Cargo feature `schemars`. |
+| `utoipa` | Derives `ToSchema` for DTOs and sort enum. | Requires Cargo feature `utoipa` and a direct `utoipa` dependency in the application crate. |
+| `from(Source, ..)` | Generates conversions from source types to response. | No conversions unless listed; source fields default to same Rust names. |
+| `no(from, setters, patch, default, new)` | Disables selected generated helpers. | Helpers are enabled by default. |
 
-| Trait          | Generated for       | Method                                                                       |
-| -------------- | ------------------- | ---------------------------------------------------------------------------- |
-| `Patch<User>`  | `UserUpdateRequest` | `update.apply_to(&mut user)` copies every supplied field                     |
-| `Diff<User>`   | `UserUpdateRequest` | `UserUpdateRequest::diff(&old, &new)` builds the update between two entities |
-| `Filter<User>` | `UserQueryRequest`  | `query.matches(&user)` tests the equality filters in memory                  |
+Per-DTO blocks accept `name`, `vis`, `derive`, `serde`, `rename_all`, and
+`strict`. `query(...)` also accepts `paginate`. A per-DTO `name` is the full
+generated type name, not a prefix. Per-DTO names and visibility take
+precedence over shared values; derives accumulate; and per-DTO `strict` can
+override shared `strict`. Serde attributes are appended. An entity-level
+`rename_all` replaces a source struct's Serde `rename_all`; do not specify
+multiple `rename_all` values for a generated DTO.
 
-`Patch` is always generated (disable with `no(patch)`). `Diff` and `Filter` are
-opt-in with `#[entity(diff)]` and `#[entity(matches)]`, because they require
-`Clone` and `PartialEq` on the field types.
+### Defaults for omitted create fields
 
-### Richer Query Requests
+`#[entity(default)]` uses `Default::default()` when create input omits a field.
+`#[entity(default = "path::to::function")]` calls the named function instead.
+The field must be included in create. These options set Serde defaults on the
+create DTO only; `#[entity(default...)]` replaces a copied field-level Serde
+`default` there.
 
-Query fields are optional equality filters by default. Add modes to opt into
-inclusive range bounds or text substring filters. Mark fields `sortable` to
-generate a typed sort enum. `query(paginate)` adds page parameters directly to
-the same request, so one extractor handles filtering, sorting and pagination.
+## Validation
+
+Validation uses Garde rules. The derive parses attributes and checks supported
+type/argument combinations at compile time, then generates `garde::Validate`
+for each request DTO containing the field. Responses are not validated. Import
+`folks::garde::Validate` or use the prelude.
 
 ```rust
+use folks::Entity;
+
 #[derive(Entity)]
-#[entity(matches, query(paginate))]
-struct User {
+struct Signup {
     #[entity(id)]
     id: u64,
-    #[entity(readonly, query(range), sortable)]
-    #[serde(rename = "createdAt")]
-    created_at: i64,
-    #[entity(query(eq))]
-    email: String,
+    #[entity(validate(length(min = 1, max = 80)))]
+    name: String,
+    #[entity(validate(range(min = 0, max = 150)))]
+    age: u8,
+    #[entity(validate(each(length(min = 1, max = 16))))]
+    tags: Vec<String>,
 }
 ```
 
-This accepts a request such as:
-
-```text
-GET /users?email=alice%40example.com&created_from=1700000000&sort=createdAt&order=desc&page=2
-```
-
-`query(eq, range)` exposes both `<field>` and `<field>_from` / `<field>_to`.
-`query(contains)` exposes `<field>_contains` for text. `sort` is an optional
-`UserSortField`; `order` is an optional `SortOrder`, and
-`order.unwrap_or_default()` gives ascending order. `page_request()` converts
-the optional `u32` values into a `PageRequest`, defaulting to page 1 and
-`DEFAULT_PER_PAGE`; the page size is clamped by `PageRequest`.
-
-With `matches`, equality, range and substring filters are all evaluated in
-memory. Fields with `validate(..)` rules retain those rules on range bounds;
-substring filters keep length, ASCII, alphanumeric and custom rules.
-
-### Field Normalization
-
-`normalize(..)` transforms request values in order during deserialization and
-through generated constructors and setters. It supports `String`,
-`Option<String>` and clearable `Maybe<String>` fields; absent attributes leave
-values untouched.
+Shared rules apply to each request DTO containing the field unless that DTO
+has its own `validate(...)` override. A target override replaces the shared
+rules; it does not merge with them. Rules are checked against each request
+DTO's effective field type:
 
 ```rust
-#[entity(normalize(trim, lowercase))]
-email: String,
-#[entity(normalize(trim, collapse_whitespace))]
-name: String,
-#[entity(normalize(snake_case))]
-permission: String,
-```
+use folks::Entity;
 
-Whitespace operations are `trim`, `trim_start`, `trim_end` and
-`collapse_whitespace`. Casing operations are `lowercase`, `uppercase`,
-`camel_case`, `pascal_case`, `snake_case`, `kebab_case`,
-`screaming_snake_case`, `screaming_kebab_case`, `title_case` and
-`sentence_case`. At most one casing operation may be specified. Public fields
-can still be assigned directly, which bypasses normalization; use the generated
-constructors/setters or deserialize request data to store normalized input.
-
-### Validation
-
-Validation is configured per field with `#[entity(validate(rule, rule, ..))]`.
-Rules are parsed and checked against the field type at compile time, and they
-run through garde's rule functions re-exported by `folks`, so consuming crates
-do not need a `garde` dependency.
-
-```rust
-#[entity(validate(length(min = 1, max = 64)))]            name: String,
-#[entity(validate(range(min = 0, max = 150)))]            age: u8,
-#[entity(validate(required, length(max = 280)))]          bio: Option<String>,
-#[entity(validate(each(length(min = 1, max = 16))))]      tags: Vec<String>,
-#[entity(validate(custom(is_slug)))]                      slug: String,
-```
-
-Target blocks on a field may replace the shared rules for one request type:
-
-```rust
-#[entity(validate(length(min = 8)), create(validate(length(min = 12))), update(validate(length(min = 16))))]
-password: String,
-```
-
-The shared rules apply to request DTOs without an override; an explicit
-`create(validate(..))`, `update(validate(..))`, `delete(validate(..))` or
-`query(validate(..))` replaces them for that DTO.
-
-| Rule                                             | Applies to                                               | Notes                                                                                         |
-| ------------------------------------------------ | -------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `length(min, max, equal)`                        | Text, collections                                        | Optional mode: `bytes`, `chars`, `utf16`                                                      |
-| `range(min, max)`                                | Integers, floats                                         | Literal bounds                                                                                |
-| `ascii`, `alphanumeric`                          | Text                                                     |                                                                                               |
-| `contains("..")`, `prefix("..")`, `suffix("..")` | Text                                                     |                                                                                               |
-| `email`, `url`, `pattern("regex")`               | Text                                                     | Require the Cargo feature of the same name; the regular expression is checked at compile time |
-| `required`                                       | Fields declared `Option<T>`                              | Enforced in create requests                                                                   |
-| `custom(path)`                                   | Any type                                                 | `fn(&T) -> Result<(), E>` where `E: Display`; deref coercion allows `&str` and `&[T]`         |
-| `each(rules..)`                                  | `Vec`, `VecDeque`, `HashSet`, `BTreeSet`, slices, arrays | Element failures are named `field[index]`                                                     |
-
-Behaviour:
-
-- Rules are written against the declared type with one `Option` layer removed.
-  For optional values (declared `Option<T>`, update and query fields, and
-  clearable `Maybe<T>`), rules run only when a value is present.
-- Rules on the id apply to delete and query requests.
-- The request types implement `garde::Validate<Context = ()>`. `validate()`
-  reports every failure at once in a `garde::Report`, so
-  `Garde<Json<UserCreateRequest>>` (axum-valid) and similar extractors work.
-- Failures are reported under the field's **serialized** name: serde `rename`
-  and `rename_all` (including a per-type `rename_all`) are applied, and
-  collection elements are `field[index]`.
-- `folks::Error` implements `From<garde::Report>`, so `request.validate()?`
-  works in a handler returning `folks::Error`. The result is
-  `Error::Invalid(Vec<FieldError>)` (each `FieldError` has a serializable
-  `field` and `message`).
-- Request-level problems, such as an update request that sets nothing, are
-  root-level garde errors (empty path). A report with only such entries
-  becomes `Error::ValidationError(String)`.
-- `custom(path)` keeps the signature `fn(&T) -> Result<(), E>`; you do not
-  have to use garde's `(&T, &Ctx)` signature.
-- The inherent `is_empty()` is true when there are no required fields and every optional
-  field is unset. An empty update fails `validate()`; empty create and query
-  requests are valid.
-
-The following are rejected at compile time, with the error pointing at the rule:
-a rule on a type it cannot apply to (`length` on an integer, `range` on a
-string), unknown rules and arguments (with a suggestion), duplicate rules,
-`min` greater than `max`, `required` on a non-`Option` field, and `validate` on
-a field that appears in no request type.
-
-### Migrating from `Validatable`
-
-`Validatable` is gone; the generated request types implement
-`garde::Validate` instead.
-
-| Before                                       | After                                                                                  |
-| -------------------------------------------- | -------------------------------------------------------------------------------------- |
-| `use folks::Validatable;`                    | `use folks::garde::Validate;` (or `folks::prelude::*`)                                 |
-| `req.validate() -> Result<(), folks::Error>` | `req.validate() -> Result<(), garde::Report>`; use `?` or `folks::Error::from(report)` |
-| `req.is_valid()` / `req.is_invalid()`        | `req.validate().is_ok()` / `.is_err()`                                                 |
-| `req.is_empty()`                             | unchanged (now an inherent method)                                                     |
-| error `field` was the Rust field name        | error `field` is the serialized name (`rename`, `rename_all`)                          |
-
-### Serialization
-
-Generated types derive `Serialize` and `Deserialize` using
-`#[serde(crate = "::folks::serde")]`.
-
-- A `#[serde(rename_all = ..)]` on the source struct is copied to every generated
-  type.
-- Field-level `rename` and `alias` are copied to every type containing the field.
-- `default`, `with`, `serialize_with`, `deserialize_with` and
-  `skip_serializing_if` are copied only to response, create and delete types,
-  where the field keeps its declared type.
-- Other serde keys are not propagated.
-- For `serde_with`, use `#[entity(serde_as = "DisplayFromStr")]`, naming the
-  adapter for the inner type. It is wrapped in `Option<..>` automatically where
-  the generated field is optional, and `#[serde_as]` is added to the generated
-  struct as needed.
-
-### Attribute Reference
-
-Struct-level options go in `#[entity(..)]`, which may be split across several
-attributes. Shared options apply to every generated type; a per-type block
-(`response(..)`, `create(..)`, `update(..)`, `delete(..)`, `query(..)`) adds to
-or overrides them.
-
-```rust
 #[derive(Entity)]
-#[entity(
-    rename_all = "camelCase",                // every type
-    strict,                                  // deny_unknown_fields on requests
-    derive(PartialEq),                       // every type
-    response(name = "UserDto", derive(Eq)),  // only the response
-    create(name = "NewUser"),
-    patch,                                   // JSON merge-patch updates
-    no(from),                                // provide your own From
-)]
-pub struct User { /* .. */ }
+struct Credentials {
+    #[entity(id)]
+    id: u64,
+    #[entity(
+        validate(length(min = 8)),
+        create(validate(length(min = 12))),
+        update(validate(length(min = 16))),
+    )]
+    password: String,
+}
 ```
 
-| Option               | Description                                                                  |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `name = ".."`        | Prefix of the generated type names                                           |
-| `vis = ".."`         | Visibility of generated types (default: the entity's; may widen, not narrow) |
-| `derive(..)`         | Additional derives; lists from shared options and per-type blocks add up     |
-| `serde(..)`          | Additional container-level serde attributes (`crate` is reserved)            |
-| `rename_all = ".."`  | Shorthand for `serde(rename_all = ..)`                                       |
-| `strict`             | `deny_unknown_fields` on the four request types, not on the response         |
-| `patch`              | Every `Option<T>` field becomes clearable                                    |
-| `diff`, `matches`    | Opt-in `Diff` and `Filter` implementations                                   |
-| `schemars`, `utoipa` | Opt-in schema derives (require the matching Cargo feature)                   |
-| `from(Type)`         | Generates `From<Type> for Response`; repeat for multiple source types        |
-| `no(..)`             | Disables `from`, `setters`, `patch`, `default` or `new`                      |
+Here create enforces a minimum length of 12, update enforces 16, and other
+applicable request DTOs inherit the shared minimum of 8. A validation-only
+block leaves the field's normal inclusion unchanged.
 
-Per-type blocks accept `name`, `vis`, `derive`, `serde`, `rename_all` and
-`strict`. `query(paginate)` is also available inside the query block.
+### Validation rule reference
 
-#### Field attributes
+| Rule | Arguments | Supported types / behavior |
+| --- | --- | --- |
+| `length(...)` | At least one of `min = N`, `max = N`, `equal = N`; optional mode `simple`, `bytes`, `chars`, or `utf16`. | Text and supported collections. `equal` cannot combine with `min` or `max`; `min` cannot exceed `max`. Default mode is Garde `simple`. |
+| `range(...)` | At least one of `min = N`, `max = N`; numeric literals. | Integers and floats. Integer fields require integer bounds; unsigned fields reject negative bounds. |
+| `ascii` | None. | Text. |
+| `alphanumeric` | None. | Text. |
+| `contains("text")` | One string literal. | Text contains the string. |
+| `prefix("text")` | One string literal. | Text starts with the string. |
+| `suffix("text")` | One string literal. | Text ends with the string. |
+| `email` | None. | Text; requires Cargo feature `email`. |
+| `url` | None. | Text; requires Cargo feature `url`. |
+| `pattern("regex")` | One regular expression. | Text; requires Cargo feature `pattern`. Regex syntax is checked by the macro when enabled. |
+| `required` | None. | Declared `Option<T>` create field; requires a supplied create value. |
+| `custom(path)` | One function path. | `fn(&T) -> Result<(), E>` where `E: Display`; deref coercion allows `&str` and `&[T]` parameters. |
+| `each(rule, ..)` | One or more nested rules. | `Vec`, `VecDeque`, `HashSet`, `BTreeSet`, slices, and arrays. Errors include element indexes; `required` is not valid inside `each`. |
 
-| Attribute | Purpose |
+A custom validator can implement application-specific checks:
+
+```rust
+use folks::Entity;
+
+fn is_slug(value: &str) -> Result<(), &'static str> {
+    if value.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+        Ok(())
+    } else {
+        Err("use lowercase letters, digits, and hyphens")
+    }
+}
+
+#[derive(Entity)]
+struct Label {
+    #[entity(id)]
+    id: u64,
+    #[entity(validate(custom(is_slug)))]
+    slug: String,
+}
+```
+
+Rules on optional values run only when a value is present. For declared
+`Option<T>`, rules are checked against `T`; update/query wrapping does not add
+another `Option`. On clearable `Maybe<T>`, rules run only for `Maybe::Set`.
+`required` is enforced only for create requests. Id rules apply to delete and
+query where the id is included.
+
+Validation collects all failures in a `garde::Report`, using serialized names
+(including Serde renames) and collection paths such as `tags[1]`. Empty updates
+produce a request-level failure; empty create and query requests are valid.
+`folks::Error` converts reports into `Error::Invalid(Vec<FieldError>)` or,
+when only request-level failures exist, `Error::ValidationError(String)`.
+
+## Normalization
+
+`#[entity(normalize(...))]` transforms request values in declaration order. It
+runs during request deserialization and through generated constructors and
+setters; response DTOs are not normalized. Validation checks a normalized copy.
+Direct assignment to a public DTO field bypasses stored-value normalization.
+
+```rust
+use folks::Entity;
+
+#[derive(Entity)]
+struct NormalizedInput {
+    #[entity(id)]
+    id: u64,
+    #[entity(normalize(trim, lowercase))]
+    email: String,
+    #[entity(normalize(trim, collapse_whitespace))]
+    display_name: String,
+}
+```
+
+| Category | Supported operations |
 | --- | --- |
-| `id` | Marks the required identifier field. |
-| `skip` | Excludes a field from generated DTOs. |
-| `readonly` / `immutable` | Restricts a field to response/query, or response/create/query, respectively. |
-| `secret` | Accepts a field on input, omits it from responses and redacts generated `Debug` output. |
-| `sortable` | Adds a field to the generated query sort enum. |
-| `response`, `create`, `update`, `delete`, `query` | Selects the DTOs that contain a field. Each target can accept `ty = Type` and `rename = "wireName"`; query also accepts `eq`, `range` and `contains`. |
-| `default` / `default = "path"` | Supplies a create value when the field is omitted. The function form returns the create field type. |
-| `clearable` / `clearable = false` | Enables or opts out of null-clearing for an `Option<T>` update field. |
-| `serde_as = "Adapter"` | Applies a `serde_with` adapter to the field. |
-| `validate(..)` | Adds shared Garde rules to applicable request DTOs. |
-| `create(validate(..))`, `update(validate(..))`, `delete(validate(..))`, `query(validate(..))` | Replaces shared validation rules for that request DTO. A validation-only block keeps the field’s default inclusion. |
-| `normalize(..)` | Normalizes request values during deserialization, generated setters, and validation. |
-| `map(..)` | Maps a source-model field in the `from(SourceType)` response conversion. |
+| Whitespace | `trim`, `trim_start`, `trim_end`, `collapse_whitespace` |
+| Casing | `lowercase`, `uppercase`, `camel_case`, `pascal_case`, `snake_case`, `kebab_case`, `screaming_snake_case`, `screaming_kebab_case`, `title_case`, `sentence_case` |
 
-Most attributes can be combined when their purposes do not conflict. For
-example, this field is immutable, renamed on the wire, and validated:
+Whitespace operations may be combined and run in the order listed. At most
+one casing operation may be used on a field. Supported effective types are
+`String`, `Option<String>`, and `Maybe<String>` where the generated DTO shape
+permits them. `None`, `Maybe::Unset`, and `Maybe::Null` are preserved. Fields
+without `normalize(...)` are unchanged.
 
-```rust
-#[entity(immutable, validate(length(min = 2, max = 80)))]
-#[serde(rename = "displayName")]
-name: String,
-```
+## Field mapping and conversions
 
-#### Customizing one generated DTO
+`#[entity(from(SourceType))]` generates `From<SourceType> for EntityResponse`.
+By default, source fields use the same Rust name as the response field and
+convert through `Into::into`. Multiple source types can be listed. The `map`
+attribute only affects these source-to-response conversions; mapped fields
+must be included in the response DTO.
 
-Use a target block when a request or response needs a different field type or
-wire name. These options also include the field in that target DTO:
+Use `map(from = "source_field")` to select a differently named source field.
+Add `map(with = "path")` for an explicit conversion function. It is a normal
+user-defined function that takes the selected source value **by value** and
+returns the response field type:
 
 ```rust
-#[entity(
-    response(ty = String, rename = "emailAddress"),
-    create(ty = String),
-    update(ty = String),
-)]
-email: Email,
-```
+use folks::Entity;
 
-`ty = Type` changes the generated field type; conversion uses `Into` for
-responses and `From` for applying updates. `rename = ".."` changes that DTO’s
-serde name and its validation error path. Validation-only target blocks are an
-exception: they replace rules without changing normal field inclusion.
+mod model {
+    pub struct UserModel {
+        pub id: u64,
+        pub email_address: String,
+        pub disabled_at: Option<i64>,
+    }
+}
 
-#### Mapping a source model
+mod mapping {
+    pub fn is_set<T>(value: Option<T>) -> bool {
+        value.is_some()
+    }
+}
 
-Declare one or more source types on the entity. Fields map by the same Rust
-name by default. Use `from` to select a different source field and `with` when
-the value needs an explicit conversion:
-
-```rust
 #[derive(Entity)]
 #[entity(from(crate::model::UserModel))]
 struct User {
@@ -634,123 +486,254 @@ struct User {
     #[entity(map(from = "disabled_at", with = "crate::mapping::is_set"))]
     disabled: bool,
 }
+
+fn response(model: model::UserModel) -> UserResponse {
+    model.into()
+}
 ```
 
-The conversion function takes the selected source field by value and returns
-the response field type. For example, `fn is_set<T>(value: Option<T>) -> bool`
-can return `value.is_some()` to expose an optional timestamp as a response
-boolean. `folks` does not infer timestamp relationships or generate state
-updates. Mapping applies only to `From<Source> for Response`.
+The email conversion uses `Into`; the custom function receives the source's
+`disabled_at` value. `map(with = "path")` without `from` uses the same-named
+source field. Missing source fields or incompatible conversion functions fail
+to compile. Mapping does not infer timestamp relationships or generate state
+updates.
 
-#### Normalizing request fields
+The derive also generates `From<Entity> for EntityResponse` by moving fields
+from the entity. Disable this helper with `#[entity(no(from))]` to provide a
+manual conversion. `no(from)` does not disable explicit `from(SourceType)`
+conversions.
 
-List operations in the order they should run. Whitespace operations are
-`trim`, `trim_start`, `trim_end` and `collapse_whitespace`. Casing operations
-are `lowercase`, `uppercase`, `camel_case`, `pascal_case`, `snake_case`,
-`kebab_case`, `screaming_snake_case`, `screaming_kebab_case`, `title_case` and
-`sentence_case`. Use at most one casing operation per field:
+## Updates and `Maybe<T>`
+
+Update and query fields are optional. A declared `T` becomes `Option<T>`; a
+declared `Option<T>` remains `Option<T>` rather than becoming
+`Option<Option<T>>`. For ordinary update fields, `None` means “not supplied.”
+
+Use `#[entity(clearable)]` on an `Option<T>` field or struct-level `patch` to
+represent explicit JSON `null`. A clearable update field has type `Maybe<T>`:
+
+| JSON input | Rust value | Meaning |
+| --- | --- | --- |
+| Key omitted | `Maybe::Unset` | Leave the entity field unchanged. |
+| `"bio": null` | `Maybe::Null` | Clear the entity field. |
+| `"bio": "text"` | `Maybe::Set("text")` | Replace the entity field. |
+
+Generated Serde attributes default omitted fields to `Unset` and skip `Unset`
+when serializing the update. `Maybe<T>` also has `as_ref`, `map`,
+`into_value`, `into_nested`, and `apply_to(&mut Option<T>)` methods. When
+serialized directly, `Unset` and `Null` each serialize as null; the generated
+update field skips `Unset` to preserve the distinction in objects.
+
+## Queries, sorting, and pagination
+
+Query fields are optional equality filters by default. `query(range)` adds
+inclusive lower and upper bounds; `query(contains)` adds a substring filter to
+a text field. `query(eq, range)` keeps equality while adding both bounds.
+Derived filter names use the Rust field name, such as `created_at_from`.
 
 ```rust
-#[entity(normalize(trim, lowercase))]
-email: String,
-#[entity(normalize(trim, collapse_whitespace))]
-name: String,
+use folks::Entity;
+
+#[derive(Entity)]
+#[entity(matches, query(paginate))]
+struct User {
+    #[entity(id)]
+    id: u64,
+    #[entity(readonly, query(range), sortable)]
+    created_at: i64,
+    #[entity(query(contains))]
+    name: String,
+}
 ```
 
-Supported field types are `String`, `Option<String>` and `Maybe<String>` where
-the generated DTO shape permits them. A direct assignment to a public field
-does not rewrite its stored value; validation checks a normalized copy.
+This query DTO has optional `created_at_from`, `created_at_to`, and
+`name_contains` fields, plus `sort`, `order`, `page`, and `per_page`.
+`sortable` fields become variants of `UserSortField`; Serde naming follows the
+query DTO configuration. `order` is a `SortOrder`; use
+`order.unwrap_or_default()` for ascending order. These types describe query
+input and do not execute a database query.
 
-`#[entity(default)]` and `#[entity(default = "path::to_fn")]` fill a field when
-a create request omits it.
-
-### Pagination
-
-`PageRequest` is a 1-based, clamped page request. `offset()` and `limit()` are
-always safe to hand to a data store: the page size defaults to 20 and is capped
-at 100. `Page<T>` carries `items`, `total`, `page` and `per_page`, provides
-`total_pages()`, and converts items with `map`:
+`query(paginate)` adds `page` and `per_page` as `Option<u32>` and generates
+`page_request()`. `PageRequest` is 1-based, defaults to 20 items, clamps limits
+to 1 through 100, and calculates offsets with saturating arithmetic. `Page<T>`
+contains `items`, `total`, `page`, and `per_page`; it provides `total_pages()`
+and `map`, which transforms items while preserving pagination data:
 
 ```rust
-let page = Page::new(users, total, &page_request).map(UserResponse::from);
+use folks::{Entity, Page};
+
+#[derive(Entity)]
+#[entity(query(paginate))]
+struct Account {
+    #[entity(id)]
+    id: u64,
+}
+
+fn response_page(
+    rows: Vec<Account>,
+    total: u64,
+    query: &AccountQueryRequest,
+) -> Page<AccountResponse> {
+    Page::new(rows, total, &query.page_request()).map(AccountResponse::from)
+}
 ```
 
-### Integrations
+## Patching, diffs, and in-memory filtering
 
-| Integration   | Enable                                               | Notes                                                                                     |
-| ------------- | ---------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| schemars      | Cargo feature `schemars`, then `#[entity(schemars)]` | Derives `JsonSchema` through `folks::schemars`; no extra dependency                       |
-| utoipa        | Cargo feature `utoipa`, then `#[entity(utoipa)]`     | Derives `ToSchema`; utoipa hardcodes its paths, so the crate must also depend on `utoipa` |
-| Other derives | `derive(..)` in a type block                         | For example `response(derive(sqlx::FromRow))`, with that crate as a dependency            |
+`Patch<Entity>` is generated for the update request by default. Its
+`apply_to(&mut entity)` method applies supplied fields. Clearable `Maybe<T>`
+fields distinguish set, clear, and leave-unchanged operations.
 
-Integrations are opt-in per entity rather than automatic, because Cargo features
-are unified across a build and would otherwise affect unrelated crates.
+`#[entity(diff)]` opts into `Diff<Entity>` for the update request. Its
+`diff(&old, &new)` function builds an update from changed fields and requires
+`Clone + PartialEq` for included entity fields. A regular `Option<T>` transition
+to `None` cannot be represented as a clear without making the field clearable.
 
-## Cargo Features
+`#[entity(matches)]` opts into `Filter<Entity>` for the query request.
+`matches(&entity)` evaluates supplied equality, range, and substring filters in
+memory; an empty query matches every entity. This helper is useful for small
+in-memory collections and tests, not database query planning.
 
-No feature is enabled by default.
+The struct-level `patch` option controls nullable update representation;
+`no(patch)` disables the generated `Patch<Entity>` implementation. These
+options are independent. `diff` and `matches` are also independently opt-in
+because they require comparisons and, for diffs, cloning.
 
-| Feature    | Description                                             |
-| ---------- | ------------------------------------------------------- |
-| `schemars` | Re-exports `schemars` and enables `#[entity(schemars)]` |
-| `utoipa`   | Re-exports `utoipa` and enables `#[entity(utoipa)]`     |
-| `email`    | Enables the `email` validation rule                     |
-| `url`      | Enables the `url` validation rule                       |
-| `pattern`  | Enables the `pattern("..")` rule and re-exports `regex` |
+## Cargo features
 
-## Development
+No features are enabled by default.
+
+| Feature | Enables | Additional requirement |
+| --- | --- | --- |
+| `schemars` | Re-exports `schemars`; enables `#[entity(schemars)]`. | None beyond the feature. |
+| `utoipa` | Re-exports `utoipa`; enables `#[entity(utoipa)]`. | Application crate must directly depend on `utoipa`; its derive uses `::utoipa` paths. |
+| `email` | Garde's `email` validation rule. | Enable feature `email` on `folks`. |
+| `url` | Garde's `url` validation rule. | Enable feature `url` on `folks`. |
+| `pattern` | `pattern("...")` validation and re-export of `regex`. | Enable feature `pattern` on `folks`. |
+
+Schema support is also selected per entity using `#[entity(schemars)]` or
+`#[entity(utoipa)]`. Cargo features are crate-wide; the derive options select
+which entities receive the schema derives.
+
+## Complete attribute reference
+
+This section consolidates supported syntax. Explanations and interactions are
+provided in the sections above.
+
+### Field attributes
+
+| Attribute | Default behavior | Applicable DTOs / types | Example |
+| --- | --- | --- | --- |
+| `id` | Required id; response, delete, query. | Exactly one named field. | `#[entity(id)]` |
+| `skip` | Excluded everywhere. | Conflicts with target lists and `readonly`/`immutable`. | `#[entity(skip)]` |
+| `readonly` | Response and query. | Non-id field; cannot combine with target lists other than `query`. | `#[entity(readonly)]` |
+| `immutable` | Response, create, query. | Non-id field; cannot combine with target lists other than `query`. | `#[entity(immutable)]` |
+| `secret` | Create and update; redacted in generated `Debug`. | Not response/query/id/readonly/immutable/skip/sortable. | `#[entity(secret)]` |
+| `response`, `create`, `update`, `delete`, `query` | Ordinary defaults unless a target list is present. | Selects exactly the listed DTOs; query is optional and id has restrictions. | `#[entity(response, create)]` |
+| `target(ty = T)` | Keeps the source type. | Any target; query overrides cannot combine with `matches`, update overrides cannot combine with `diff`. | `#[entity(response(ty = String))]` |
+| `target(rename = "x")` | Uses Serde/source field name. | Any target. | `#[entity(create(rename = "email"))]` |
+| `query(eq)` | Equality is the default. | Query fields. | `#[entity(query(eq))]` |
+| `query(range)` | No bounds. | Ordered field types; inclusive `_from` and `_to`. | `#[entity(query(range))]` |
+| `query(contains)` | No substring filter. | Text fields; creates `_contains`. | `#[entity(query(contains))]` |
+| `sortable` | Not sortable. | Any non-skipped, non-secret field; it need not be a query filter. | `#[entity(sortable)]` |
+| `default` / `default = "path"` | No generated create default. | Create field; `path` returns the create field type. | `#[entity(default)]` |
+| `clearable` / `clearable = false` | `Option<T>` uses `None` as unchanged. | `Option<T>` update; false opts out of struct `patch`. | `#[entity(clearable)]` |
+| `serde_as = "Adapter"` | No adapter. | Declared inner type; incompatible with `ty` and clearable. | `#[entity(serde_as = "DisplayFromStr")]` |
+| `validate(rule, ..)` | No rules. | Request DTOs containing the field. | `#[entity(validate(length(min = 1)))]` |
+| `target(validate(rule, ..))` | Inherits shared rules. | Create, update, delete, query; replaces shared rules for that DTO. | `#[entity(create(validate(required)))]` |
+| `normalize(op, ..)` | No normalization. | Effective type `String`, `Option<String>`, or `Maybe<String>`. | `#[entity(normalize(trim, lowercase))]` |
+| `map(from = "field")` | Same-name source field. | Response field with struct `from(SourceType)`. | `#[entity(map(from = "email_address"))]` |
+| `map(with = "path")` | Converts with `Into`. | Response field with struct `from(SourceType)`; function accepts source value by value. | `#[entity(map(with = "mapping::clean"))]` |
+| `map(from = "field", with = "path")` | No explicit mapping. | Combines source selection and function conversion. | `#[entity(map(from = "disabled_at", with = "mapping::is_set"))]` |
+
+Here `target` means one of `response`, `create`, `update`, `delete`, or
+`query`. A target block containing only `validate(...)` changes the rules but
+does not itself include the field in that target. With no explicit field list,
+ordinary inclusion defaults still apply. With an explicit field list, combine
+the validation override with another target option such as `rename` or `ty` if
+that target must remain included.
+
+### Struct and per-DTO options
+
+| Syntax | Scope | Purpose / default |
+| --- | --- | --- |
+| `name = "Prefix"` | Struct | Prefix for generated type names; entity name by default. |
+| `vis = "Visibility"` | Struct or DTO block | Generated visibility; entity visibility by default. |
+| `derive(Path, ..)` | Struct or DTO block | Additional derives; shared and target lists accumulate. |
+| `serde(meta, ..)` | Struct or DTO block | Additional Serde container metadata; `crate` is reserved. |
+| `rename_all = "case"` | Struct or DTO block | Serde field naming; source struct `serde(rename_all)` is used unless entity configuration sets it. Use one entity setting per DTO. |
+| `strict` / `strict = false` | Struct or DTO block | Adds/removes `deny_unknown_fields`; shared setting affects request DTOs only. |
+| `response(..)`, `create(..)`, `update(..)`, `delete(..)`, `query(..)` | Struct | Per-DTO `name`, `vis`, `derive`, `serde`, `rename_all`, and `strict`; `query` also accepts `paginate`. |
+| `query(paginate)` | Struct or query block | Adds `page`, `per_page`, and `page_request()`. |
+| `patch` | Struct | Enables clearable update semantics for eligible `Option<T>` fields. |
+| `diff` | Struct | Enables update diff generation; disabled by default. |
+| `matches` | Struct | Enables in-memory query matching; disabled by default. |
+| `from(Source, ..)` | Struct | Generates response conversions from listed source types. |
+| `schemars` / `utoipa` | Struct | Enables per-entity schema derives; needs same-named Cargo feature. |
+| `no(from, setters, patch, default, new)` | Struct | Disables selected helpers; helpers are enabled by default. |
+
+### Validation arguments
+
+| Rule | Supported arguments |
+| --- | --- |
+| `length` | One or more `min = u64`, `max = u64`, `equal = u64`; optional mode `simple`, `bytes`, `chars`, `utf16`. `equal` is exclusive with bounds. |
+| `range` | One or both numeric literals: `min = number`, `max = number`. |
+| `ascii`, `alphanumeric`, `email`, `url`, `required` | No arguments. |
+| `contains`, `prefix`, `suffix`, `pattern` | Exactly one string literal; `pattern` requires the `pattern` feature. |
+| `custom` | One function path. |
+| `each` | One or more nested rules. |
+
+### Normalization operations
+
+| Whitespace | Casing |
+| --- | --- |
+| `trim`, `trim_start`, `trim_end`, `collapse_whitespace` | `lowercase`, `uppercase`, `camel_case`, `pascal_case`, `snake_case`, `kebab_case`, `screaming_snake_case`, `screaming_kebab_case`, `title_case`, `sentence_case` |
+
+Whitespace and casing operations run in declaration order; only one casing
+operation may be listed.
+
+## Limitations and common mistakes
+
+- `Entity` supports structs with named fields, not tuple structs, enums, or
+  unit structs.
+- `Option` detection is syntactic: `Option<T>`, `std::option::Option<T>`, and
+  `core::option::Option<T>` are recognized; aliases are not.
+- The macro cannot classify validation types hidden behind aliases or generic
+  parameters. Rust checks those through Garde's trait bounds.
+- Required derives impose trait bounds on entity and DTO fields, commonly
+  `Clone`, `Debug`, `Serialize`, and `Deserialize`.
+- `From<Entity> for Response` moves entity fields and is unavailable when the
+  entity implements `Drop`; use `no(from)` and a manual conversion instead.
+- Generated visibility can be widened, but cannot be narrower than the entity
+  visibility.
+- A regular `Option<T>` diff cannot express a transition to `None`; make the
+  field clearable to represent deletion.
+- Query ranges, substring filters, sorting, and pagination add generated field
+  names. Name collisions are compile errors.
+- When combining an explicit field target list with a target-specific
+  validation override, the target block must contain an inclusion option as
+  well (for example `rename` or `ty`). A block containing only `validate(...)`
+  does not include that target.
+- `map(...)` only applies to response fields converted from an explicitly
+  configured source type. Custom functions are user code; they must accept the
+  source value and return the response field type.
+
+## Examples and tests
+
+Integration tests and focused usage examples are in `crates/folks/tests`.
+Compile-fail cases and expected diagnostics are in `crates/folks/tests/ui` and
+feature-specific subdirectories. `crates/folks-consumer` verifies use through a
+renamed dependency and a web validation integration.
+
+From the repository root, run:
 
 ```bash
 cargo fmt --all -- --check
-cargo check --workspace --all-targets
-cargo clippy --workspace --all-targets
 cargo test --workspace
 cargo test --workspace --all-features
+cargo clippy --workspace --all-targets --all-features -- -D warnings
 ```
-
-The suite covers behaviour tests for each feature, a lint-strict consumer crate
-that depends on `folks` under a renamed dependency, and compile-fail tests using
-`trybuild`. Each case in `crates/folks/tests/ui` is a `.rs` file with an expected
-`.stderr` file, so diagnostics are part of the tested contract.
-
-When a diagnostic changes intentionally, review the output and regenerate the
-expected files:
-
-```bash
-TRYBUILD=overwrite cargo test -p folks --test compile
-```
-
-Expected `.stderr` files reflect the compiler version used to generate them.
-Regenerate them after reviewing the differences if you use a different
-toolchain.
-
-## Design Notes and Limitations
-
-- Only structs with named fields are supported.
-- `Option` detection is syntactic: only `Option`, `std::option::Option` and
-  `core::option::Option` are recognised, not type aliases.
-- Validation rules on aliased or generic field types cannot be classified by
-  the macro; the compiler checks those through the rule's trait bounds and
-  reports the error at the rule.
-- Generated types and the `Entity` implementation require that field types
-  support the derives in use (`Debug`, `Clone`, `Serialize`, `Deserialize`).
-- `From<Entity> for Response` moves fields out of the entity, so it is not
-  available for entities that implement `Drop`. Disable it with `no(from)`.
-- `vis` can widen the visibility of generated types but cannot narrow it below
-  the entity's own visibility.
-- With `Diff`, a flat `Option<T>` field that became `None` cannot be expressed
-  unless the field is clearable.
-- The workspace targets Rust 1.91.1 and edition 2024. Other toolchains are not
-  tested.
-
-## Contributing
-
-Contributions are welcome. Please open an issue to discuss significant changes
-before submitting a pull request. Before submitting, ensure that formatting,
-`clippy` and the full test suite pass with and without `--all-features`, and
-that any intentional diagnostic change is accompanied by regenerated `.stderr`
-files.
 
 ## License
 
-Licensed under MIT License.
+The project is licensed under the [MIT License](LICENSE).
